@@ -1,0 +1,35 @@
+﻿id_departamento;nombre;pais_id
+1;Amazonas;1
+2;Antioquia;1
+3;Arauca;1
+4;Archipiélago de San Andrés Providencia y Santa Ca;1
+5;Atlántico;1
+6;Bogotá D.C.;1
+7;Bolívar;1
+8;Boyacá;1
+9;Caldas;1
+10;Caquetá;1
+11;Casanare;1
+12;Cauca;1
+13;Cesar;1
+14;Chocó;1
+15;Córdoba;1
+16;Cundinamarca;1
+17;Guainía;1
+18;Guaviare;1
+19;Huila;1
+20;La Guajira;1
+21;Magdalena;1
+22;Meta;1
+23;Nariño;1
+24;Norte de Santander;1
+25;Putumayo;1
+26;Quindío;1
+27;Risaralda;1
+28;Santander;1
+29;Sucre;1
+30;Tolima;1
+31;Valle del Cauca;1
+32;Vaupés;1
+33;Vichada;1
+34;Sin Departamento;1

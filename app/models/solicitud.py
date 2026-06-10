@@ -22,16 +22,25 @@ class Solicitud(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     estudiante_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("usuarios.id"), nullable=False)
-    institucion_origen: Mapped[str] = mapped_column(String(255), nullable=False)
-    programa_origen: Mapped[str] = mapped_column(String(255), nullable=False)
-    institucion_destino: Mapped[str] = mapped_column(String(255), nullable=False)
-    programa_destino: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    # Campos de texto para compatibilidad
+    institucion_origen: Mapped[str] = mapped_column(String(255), nullable=True)
+    programa_origen: Mapped[str] = mapped_column(String(255), nullable=True)
+    institucion_destino: Mapped[str] = mapped_column(String(255), nullable=True)
+    programa_destino: Mapped[str] = mapped_column(String(255), nullable=True)
+
+    # Foreign keys a catálogo
+    programa_origen_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("programas.id"), nullable=True)
+    programa_destino_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("programas.id"), nullable=True)
+
     estado: Mapped[EstadoSolicitud] = mapped_column(SAEnum(EstadoSolicitud), default=EstadoSolicitud.BORRADOR)
     observaciones: Mapped[str] = mapped_column(Text, nullable=True)
     creado_en: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     actualizado_en: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     estudiante: Mapped["Usuario"] = relationship("Usuario", foreign_keys=[estudiante_id])
+    programa_origen_rel: Mapped["Programa"] = relationship("Programa", foreign_keys=[programa_origen_id])
+    programa_destino_rel: Mapped["Programa"] = relationship("Programa", foreign_keys=[programa_destino_id])
     documentos: Mapped[list["Documento"]] = relationship("Documento", back_populates="solicitud")
     homologacion: Mapped["Homologacion"] = relationship("Homologacion", back_populates="solicitud", uselist=False)
     historial: Mapped[list["HistorialEstado"]] = relationship("HistorialEstado", back_populates="solicitud")
