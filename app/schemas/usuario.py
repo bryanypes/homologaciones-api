@@ -1,18 +1,18 @@
 import uuid
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from datetime import datetime
 from app.models.usuario import Rol
-
+from typing import Optional
 
 class UsuarioBase(BaseModel):
-    nombre: str
-    apellido: str
-    email: EmailStr
-    rol: Rol
+    nombre: str = Field(..., example="Carlos", description="Nombre del usuario")
+    apellido: str = Field(..., example="García", description="Apellido del usuario")
+    email: EmailStr = Field(..., example="carlos@unicauca.edu.co", description="Correo institucional")
+    rol: Rol = Field(..., example="estudiante", description="Rol: estudiante, coordinador o rector")
 
 
 class UsuarioCreate(UsuarioBase):
-    password: str
+    password: str = Field(..., example="123456", min_length=6, description="Contraseña mínimo 6 caracteres")
 
 
 class UsuarioResponse(UsuarioBase):
@@ -24,11 +24,16 @@ class UsuarioResponse(UsuarioBase):
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr
-    password: str
+    email: EmailStr = Field(..., example="carlos@unicauca.edu.co")
+    password: str = Field(..., example="123456")
 
 
 class TokenResponse(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
+    access_token: str = Field(..., description="JWT para usar en Authorization header")
+    token_type: str = Field(default="bearer")
     usuario: UsuarioResponse
+
+class UsuarioUpdate(BaseModel):
+    nombre: Optional[str] = Field(None, example="Carlos")
+    apellido: Optional[str] = Field(None, example="García")
+    password: Optional[str] = Field(None, example="nueva_clave", min_length=6)

@@ -3,13 +3,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.core.database import get_db
 from app.core.security import hash_password, verify_password, create_access_token
+from app.core.deps import get_current_user
 from app.models.usuario import Usuario
-from app.schemas.usuario import UsuarioCreate, UsuarioResponse, LoginRequest, TokenResponse
+from app.schemas.usuario import UsuarioCreate, UsuarioResponse, LoginRequest, TokenResponse, UsuarioUpdate
+import redis.asyncio as aioredis
+from app.core.config import settings
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+router = APIRouter(prefix="/auth", tags=["Autenticación"])
 
 
-@router.post("/register", response_model=UsuarioResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/register",
+    response_model=UsuarioResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Registrar usuario",
+    description="Crea un nuevo usuario en el sistema. El rol determina los permisos que tendrá.",
+    responses={
+        201: {"description": "Usuario creado exitosamente"},
+        400: {"description": "El email ya está registrado"},
+    },
+)
 async def register(data: UsuarioCreate, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Usuario).where(Usuario.email == data.email))
     if result.scalar_one_or_none():
@@ -28,7 +41,17 @@ async def register(data: UsuarioCreate, db: AsyncSession = Depends(get_db)):
     return usuario
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post(
+    "/login",
+    response_model=TokenResponse,
+    summary="Iniciar sesión",
+    description="Autentica al usuario y retorna un token JWT.",
+    responses={
+        200: {"description": "Login exitoso, retorna JWT"},
+        401: {"description": "Credenciales inválidas"},
+        403: {"description": "Usuario inactivo"},
+    },
+)
 async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Usuario).where(Usuario.email == data.email))
     usuario = result.scalar_one_or_none()
@@ -41,3 +64,49 @@ async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
 
     token = create_access_token({"sub": str(usuario.id), "rol": usuario.rol})
     return TokenResponse(access_token=token, usuario=usuario)
+
+
+@router.post(
+    "/logout",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Cerrar sesión",
+    description="Invalida el token JWT actual agregándolo a una blacklist en Redis.",
+)
+async def logout(usuario: Usuario = Depends(get_current_user), credentials=Depends(__import__('fastapi').security.HTTPBearer())):
+    r = aioredis.from_url(settings.REDIS_URL)
+    token = credentials.credentials
+    await r.setex(f"blacklist:{token}", settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60, "1")
+    await r.aclose()
+
+
+@router.get(
+    "/me",
+    response_model=UsuarioResponse,
+    summary="Perfil del usuario",
+    description="Retorna los datos del usuario autenticado.",
+)
+async def me(usuario: Usuario = Depends(get_current_user)):
+    return usuario
+
+
+@router.patch(
+    "/me",
+    response_model=UsuarioResponse,
+    summary="Actualizar perfil",
+    description="Permite al usuario actualizar su nombre, apellido o contraseña.",
+)
+async def actualizar_perfil(
+    data: UsuarioUpdate,
+    db: AsyncSession = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    if data.nombre:
+        usuario.nombre = data.nombre
+    if data.apellido:
+        usuario.apellido = data.apellido
+    if data.password:
+        usuario.password_hash = hash_password(data.password)
+
+    await db.commit()
+    await db.refresh(usuario)
+    return usuario
