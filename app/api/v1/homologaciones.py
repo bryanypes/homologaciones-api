@@ -10,6 +10,9 @@ from app.models.documento import Documento, TipoDocumento
 from app.models.homologacion import Homologacion, HomologacionAsignatura, EstadoAsignatura
 from app.schemas.homologacion import HomologacionResponse
 from app.services.ai_service import procesar_homologacion
+from fastapi.responses import FileResponse
+from sqlalchemy.orm import selectinload
+from app.services.doc_service import generar_resolucion_docx
 
 router = APIRouter(prefix="/homologaciones", tags=["homologaciones"])
 
@@ -80,8 +83,13 @@ async def procesar(
             homologacion_id=homologacion.id,
             asignatura_origen=item["asignatura_origen"],
             creditos_origen=item.get("creditos_origen"),
+            calificacion_origen=item.get("calificacion_origen"),
             asignatura_destino=item.get("asignatura_destino"),
+            codigo_destino=item.get("codigo_destino"),
+            semestre_destino=item.get("semestre_destino"),
             creditos_destino=item.get("creditos_destino"),
+            intensidad_horaria_destino=item.get("intensidad_horaria_destino"),
+            tipo_destino=item.get("tipo_destino"),
             estado=EstadoAsignatura(item["estado"]),
             justificacion=item.get("justificacion"),
             similitud_porcentaje=item.get("similitud_porcentaje"),
@@ -133,3 +141,34 @@ async def obtener_homologacion(
     homologacion.asignaturas = result_asig.scalars().all()
 
     return homologacion
+
+@router.post("/{solicitud_id}/generar-resolucion")
+async def generar_resolucion(
+    solicitud_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    usuario=Depends(require_rol(Rol.RECTOR)),
+):
+    result = await db.execute(
+        select(Homologacion)
+        .where(Homologacion.solicitud_id == solicitud_id)
+        .options(selectinload(Homologacion.asignaturas))
+    )
+    homologacion = result.scalar_one_or_none()
+
+    if not homologacion:
+        raise HTTPException(status_code=404, detail="Homologación no encontrada")
+
+    result_sol = await db.execute(
+        select(Solicitud)
+        .where(Solicitud.id == solicitud_id)
+        .options(selectinload(Solicitud.estudiante))
+    )
+    solicitud = result_sol.scalar_one_or_none()
+
+    ruta = generar_resolucion_docx(homologacion, solicitud)
+
+    return FileResponse(
+        path=ruta,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename=f"resolucion_homologacion_{solicitud_id}.docx",
+    )
