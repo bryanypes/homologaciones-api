@@ -57,7 +57,7 @@ async def procesar(
     db.add(historial)
     await db.commit()
 
-    # Llamar a Claude
+    # Llamar a la IA
     try:
         resultado = await procesar_homologacion(
             ruta_origen=tipos[TipoDocumento.PENSUM_ORIGEN].ruta,
@@ -107,14 +107,14 @@ async def procesar(
     db.add(historial2)
 
     await db.commit()
-    await db.refresh(homologacion)
 
-    result_asig = await db.execute(
-        select(HomologacionAsignatura).where(
-            HomologacionAsignatura.homologacion_id == homologacion.id
-        )
+    # Recargar con asignaturas usando selectinload
+    result_final = await db.execute(
+        select(Homologacion)
+        .where(Homologacion.id == homologacion.id)
+        .options(selectinload(Homologacion.asignaturas))
     )
-    homologacion.asignaturas = result_asig.scalars().all()
+    homologacion = result_final.scalar_one()
 
     return homologacion
 
@@ -126,21 +126,17 @@ async def obtener_homologacion(
     usuario: Usuario = Depends(require_rol(Rol.RECTOR)),
 ):
     result = await db.execute(
-        select(Homologacion).where(Homologacion.solicitud_id == solicitud_id)
+        select(Homologacion)
+        .where(Homologacion.solicitud_id == solicitud_id)
+        .options(selectinload(Homologacion.asignaturas))
     )
     homologacion = result.scalar_one_or_none()
 
     if not homologacion:
         raise HTTPException(status_code=404, detail="Homologación no encontrada")
 
-    result_asig = await db.execute(
-        select(HomologacionAsignatura).where(
-            HomologacionAsignatura.homologacion_id == homologacion.id
-        )
-    )
-    homologacion.asignaturas = result_asig.scalars().all()
-
     return homologacion
+
 
 @router.post("/{solicitud_id}/generar-resolucion")
 async def generar_resolucion(

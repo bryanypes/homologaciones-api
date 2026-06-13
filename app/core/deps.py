@@ -3,6 +3,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import redis.asyncio as aioredis
+import uuid
 from app.core.database import get_db
 from app.core.security import decode_access_token
 from app.core.config import settings
@@ -28,7 +29,12 @@ async def get_current_user(
     if blacklisted:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token invalidado")
 
-    result = await db.execute(select(Usuario).where(Usuario.id == payload["sub"]))
+    try:
+        user_id = uuid.UUID(payload["sub"])
+    except (ValueError, KeyError):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido")
+
+    result = await db.execute(select(Usuario).where(Usuario.id == user_id))
     usuario = result.scalar_one_or_none()
 
     if not usuario or not usuario.activo:

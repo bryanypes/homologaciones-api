@@ -23,8 +23,8 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
 
-    # Anthropic
-    ANTHROPIC_API_KEY: str
+    #Gemini
+    OPENAI_API_KEY: str
 
     # Kafka
     KAFKA_BOOTSTRAP_SERVERS: str = "localhost:9092"

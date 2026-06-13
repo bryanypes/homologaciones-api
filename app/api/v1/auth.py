@@ -3,8 +3,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.core.database import get_db
 from app.core.security import hash_password, verify_password, create_access_token
-from app.core.deps import get_current_user
-from app.models.usuario import Usuario
+from app.core.deps import get_current_user, require_rol
+from app.models.usuario import Usuario, Rol
 from app.schemas.usuario import UsuarioCreate, UsuarioResponse, LoginRequest, TokenResponse, UsuarioUpdate
 import redis.asyncio as aioredis
 from app.core.config import settings
@@ -16,14 +16,25 @@ router = APIRouter(prefix="/auth", tags=["Autenticación"])
     "/register",
     response_model=UsuarioResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Registrar usuario",
-    description="Crea un nuevo usuario en el sistema. El rol determina los permisos que tendrá.",
+    summary="Registrar estudiante",
+    description=(
+        "Registro público. Solo crea usuarios con rol **estudiante**. "
+        "Para crear coordinadores o rectores, el rector debe usar `POST /usuarios/`."
+    ),
     responses={
         201: {"description": "Usuario creado exitosamente"},
-        400: {"description": "El email ya está registrado"},
+        400: {"description": "Email ya registrado o rol no permitido en registro público"},
     },
 )
 async def register(data: UsuarioCreate, db: AsyncSession = Depends(get_db)):
+    # Registro público solo para estudiantes
+    if data.rol != Rol.ESTUDIANTE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El registro público solo permite el rol 'estudiante'. "
+                   "Para otros roles, contacte al rector.",
+        )
+
     result = await db.execute(select(Usuario).where(Usuario.email == data.email))
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Email ya registrado")
@@ -33,7 +44,7 @@ async def register(data: UsuarioCreate, db: AsyncSession = Depends(get_db)):
         apellido=data.apellido,
         email=data.email,
         password_hash=hash_password(data.password),
-        rol=data.rol,
+        rol=Rol.ESTUDIANTE,
     )
     db.add(usuario)
     await db.commit()
@@ -72,7 +83,10 @@ async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
     summary="Cerrar sesión",
     description="Invalida el token JWT actual agregándolo a una blacklist en Redis.",
 )
-async def logout(usuario: Usuario = Depends(get_current_user), credentials=Depends(__import__('fastapi').security.HTTPBearer())):
+async def logout(
+    usuario: Usuario = Depends(get_current_user),
+    credentials=Depends(__import__("fastapi").security.HTTPBearer()),
+):
     r = aioredis.from_url(settings.REDIS_URL)
     token = credentials.credentials
     await r.setex(f"blacklist:{token}", settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60, "1")
@@ -100,11 +114,11 @@ async def actualizar_perfil(
     db: AsyncSession = Depends(get_db),
     usuario: Usuario = Depends(get_current_user),
 ):
-    if data.nombre:
+    if data.nombre is not None:
         usuario.nombre = data.nombre
-    if data.apellido:
+    if data.apellido is not None:
         usuario.apellido = data.apellido
-    if data.password:
+    if data.password is not None:
         usuario.password_hash = hash_password(data.password)
 
     await db.commit()
