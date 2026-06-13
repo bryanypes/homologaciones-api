@@ -4,6 +4,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.models.catalogo import Pais, Departamento, Municipio
 from app.models.academico import Institucion, Facultad, Programa
+from app.models.usuario import Usuario, Rol
+import bcrypt
+
+async def crear_usuario_inicial(db: AsyncSession):
+    # Verificar si el usuario existe
+    result = await db.execute(select(Usuario).where(Usuario.email == "rector@universidad.edu.co"))
+    if not result.scalar_one_or_none():
+        password_hash = bcrypt.hashpw("Rector2024!".encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        admin = Usuario(
+            nombre="Rector",
+            apellido="Universidad",
+            email="rector@universidad.edu.co",
+            password_hash=password_hash,
+            rol=Rol.RECTOR,
+            activo=True
+        )
+        db.add(admin)
+        await db.commit()
 
 DATA_DIR = Path(__file__).parent.parent.parent / "database" / "data"
 
@@ -53,6 +71,7 @@ async def seed_catalogos(db: AsyncSession) -> None:
     await db.flush()
     await seed_academico(db, deptos_map)
     await db.commit()
+    await crear_usuario_inicial(db)
 
 
 async def seed_academico(db: AsyncSession, deptos_map: dict) -> None:

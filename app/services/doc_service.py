@@ -3,10 +3,16 @@ import json
 import subprocess
 import tempfile
 from pathlib import Path
-from app.models.homologacion import Homologacion, HomologacionAsignatura, EstadoAsignatura
+from app.models.homologacion import (
+    Homologacion,
+    HomologacionAsignatura,
+    EstadoAsignatura,
+)
 
 
-def generar_resolucion_docx(homologacion: Homologacion, solicitud, numero_resolucion: str = None) -> str:
+def generar_resolucion_docx(
+    homologacion: Homologacion, solicitud, numero_resolucion: str = None
+) -> str:
     """
     Genera el documento Word de resolución de homologación.
     Retorna la ruta del archivo generado.
@@ -17,8 +23,10 @@ def generar_resolucion_docx(homologacion: Homologacion, solicitud, numero_resolu
     fecha = datetime.now().strftime("%d %b. %Y").upper()
 
     asignaturas_homologadas = [
-        a for a in homologacion.asignaturas
-        if a.estado in [EstadoAsignatura.HOMOLOGADA, EstadoAsignatura.HOMOLOGADA_PARCIAL]
+        a
+        for a in homologacion.asignaturas
+        if a.estado
+        in [EstadoAsignatura.HOMOLOGADA, EstadoAsignatura.HOMOLOGADA_PARCIAL]
     ]
 
     total_creditos = sum(a.creditos_destino or 0 for a in asignaturas_homologadas)
@@ -58,9 +66,15 @@ def generar_resolucion_docx(homologacion: Homologacion, solicitud, numero_resolu
         "total_cursos_matricular": 0,
         "total_creditos_matricular": 0,
         "folios": [
-            {"documento": "Formato de solicitud del aspirante/estudiante.", "folios": 1},
+            {
+                "documento": "Formato de solicitud del aspirante/estudiante.",
+                "folios": 1,
+            },
             {"documento": "Certificado oficial de calificaciones.", "folios": 2},
-            {"documento": "Contenido programático de asignaturas aprobadas.", "folios": 35},
+            {
+                "documento": "Contenido programático de asignaturas aprobadas.",
+                "folios": 35,
+            },
         ],
         "total_folios": 38,
     }
@@ -73,11 +87,17 @@ def generar_resolucion_docx(homologacion: Homologacion, solicitud, numero_resolu
         output_path = os.path.join(tmpdir, "resolucion.docx")
 
         with open(script_path, "w", encoding="utf-8") as f:
-            f.write(js_script.replace("OUTPUT_PATH", output_path))
+          safe_output_path = output_path.replace("\\", "\\\\")
+          f.write(js_script.replace("OUTPUT_PATH", safe_output_path))
 
         result = subprocess.run(
             ["node", script_path],
-            capture_output=True, text=True
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "NODE_PATH": str(Path(__file__).resolve().parents[2] / "node_modules"),
+            },
         )
 
         if result.returncode != 0:
@@ -87,6 +107,7 @@ def generar_resolucion_docx(homologacion: Homologacion, solicitud, numero_resolu
         os.makedirs("uploads/resoluciones", exist_ok=True)
         dest = f"uploads/resoluciones/resolucion_{homologacion.id}.docx"
         import shutil
+
         shutil.copy(output_path, dest)
 
     return dest

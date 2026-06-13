@@ -7,6 +7,8 @@ from app.workers.homologacion_worker import iniciar_worker_en_background
 from app.core.database import AsyncSessionLocal
 from app.core.seed import seed_catalogos
 from app.api.v1 import auth, solicitudes, documentos, homologaciones, catalogos, academico
+from app.api.v1 import auth, solicitudes, documentos, homologaciones, catalogos, academico, usuarios
+
 
 
 
@@ -39,6 +41,8 @@ app.include_router(documentos.router, prefix="/api/v1")
 app.include_router(homologaciones.router, prefix="/api/v1")
 app.include_router(catalogos.router, prefix="/api/v1")
 app.include_router(academico.router, prefix="/api/v1")
+app.include_router(usuarios.router, prefix="/api/v1")
+
 
 
 
