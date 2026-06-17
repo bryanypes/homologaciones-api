@@ -5,11 +5,11 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID
 from app.core.database import Base
 import enum
-
 class EstadoAsignatura(str, enum.Enum):
-    HOMOLOGADA = "homologada"
-    NO_HOMOLOGADA = "no_homologada"
+    HOMOLOGADA         = "homologada"
+    NO_HOMOLOGADA      = "no_homologada"
     HOMOLOGADA_PARCIAL = "homologada_parcial"
+    PENDIENTE          = "pendiente"
 
 class Homologacion(Base):
     __tablename__ = "homologaciones"
@@ -33,7 +33,7 @@ class HomologacionAsignatura(Base):
     calificacion_origen: Mapped[float] = mapped_column(Float, nullable=True)
     asignatura_destino: Mapped[str] = mapped_column(String(255), nullable=True)
     codigo_destino: Mapped[str] = mapped_column(String(20), nullable=True)
-    semestre_destino: Mapped[str] = mapped_column(String(10), nullable=True)
+    semestre_destino: Mapped[int] = mapped_column(nullable=True)
     creditos_destino: Mapped[float] = mapped_column(Float, nullable=True)
     intensidad_horaria_destino: Mapped[float] = mapped_column(Float, nullable=True)
     tipo_destino: Mapped[str] = mapped_column(String(10), nullable=True)

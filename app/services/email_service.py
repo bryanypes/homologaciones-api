@@ -1,15 +1,22 @@
+"""
+Servicio de email para notificaciones del sistema de homologaciones.
+
+Usa aiosmtplib para envío asíncrono. Las plantillas están en este mismo módulo
+para evitar dependencias de archivos externos y simplificar el despliegue.
+
+Instalar: uv add aiosmtplib
+"""
+
 import logging
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Optional
 
-from app.core.config import settings
+# FIX: import al nivel del módulo para que @patch("app.services.email_service.aiosmtplib")
+# funcione correctamente en los tests. El import tardío dentro de _enviar impedía el patcheo.
+import aiosmtplib
 
-# Import a nivel de módulo para que el patch en tests funcione correctamente
-try:
-    import aiosmtplib
-except ImportError:
-    aiosmtplib = None  # type: ignore
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -160,13 +167,8 @@ async def _enviar(destinatario: str, asunto: str, html: str, texto: str) -> None
         )
         return
 
-    if aiosmtplib is None:
-        logger.error(
-            "[Email] aiosmtplib no está instalado. "
-            "Ejecuta: uv add aiosmtplib"
-        )
-        return
-
+    # FIX: eliminado el `import aiosmtplib` tardío que estaba dentro del try.
+    # El import al nivel del módulo es suficiente y permite que el patch de tests funcione.
     try:
         mensaje = MIMEMultipart("alternative")
         mensaje["Subject"] = asunto

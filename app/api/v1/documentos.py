@@ -1,5 +1,20 @@
+"""
+documentos.py
+
+Endpoints de gestión de documentos PDF.
+
+Responsabilidades por rol:
+  - Estudiante: sube sus NOTAS (certificado de calificaciones) como pensum_origen
+  - Coordinador: sube el PENSUM DESTINO del programa al que aplica el estudiante
+  - Todos los roles autenticados: listar documentos de una solicitud (con scope)
+  - Todos los roles autenticados: descargar un PDF específico (con scope)
+
+Estados permitidos para subir documentos:
+  - Estudiante puede subir en: BORRADOR, ENVIADA, EN_REVISION
+  - Coordinador puede subir pensum destino en: EN_REVISION
+"""
+
 import os
-import uuid
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,12 +33,22 @@ router = APIRouter(prefix="/documentos", tags=["Documentos"])
 ALLOWED_MIME = "application/pdf"
 
 
-def validar_pdf(file: UploadFile) -> None:
+# ──────────────────────────────────────────────────────────────────────────────
+# Helpers internos
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _validar_pdf(file: UploadFile) -> None:
     if file.content_type != ALLOWED_MIME:
-        raise HTTPException(status_code=400, detail="Solo se aceptan archivos PDF")
+        raise HTTPException(
+            status_code=400,
+            detail="Solo se aceptan archivos PDF. El archivo enviado tiene tipo: "
+                   f"{file.content_type}",
+        )
 
 
-async def guardar_archivo(file: UploadFile, solicitud_id: UUID, tipo: TipoDocumento) -> tuple[str, int]:
+async def _guardar_archivo(
+    file: UploadFile, solicitud_id: UUID, tipo: TipoDocumento
+) -> tuple[str, int]:
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
     nombre_unico = f"{solicitud_id}_{tipo.value}.pdf"
     ruta = os.path.join(settings.UPLOAD_DIR, nombre_unico)
@@ -31,13 +56,14 @@ async def guardar_archivo(file: UploadFile, solicitud_id: UUID, tipo: TipoDocume
     contenido = await file.read()
     tamano = len(contenido)
 
+    if tamano == 0:
+        raise HTTPException(status_code=400, detail="El archivo está vacío")
+
     if tamano > settings.MAX_FILE_SIZE_MB * 1024 * 1024:
         raise HTTPException(
             status_code=400,
-            detail=f"El archivo supera el límite de {settings.MAX_FILE_SIZE_MB}MB",
+            detail=f"El archivo supera el límite de {settings.MAX_FILE_SIZE_MB} MB",
         )
-    if tamano == 0:
-        raise HTTPException(status_code=400, detail="El archivo está vacío")
 
     with open(ruta, "wb") as f:
         f.write(contenido)
@@ -45,117 +71,160 @@ async def guardar_archivo(file: UploadFile, solicitud_id: UUID, tipo: TipoDocume
     return ruta, tamano
 
 
-async def _obtener_solicitud_con_permiso(
-    solicitud_id: UUID, usuario: Usuario, db: AsyncSession
+async def _obtener_solicitud(
+    solicitud_id: UUID, db: AsyncSession
 ) -> Solicitud:
-    result = await db.execute(select(Solicitud).where(Solicitud.id == solicitud_id))
+    result = await db.execute(
+        select(Solicitud).where(Solicitud.id == solicitud_id)
+    )
     solicitud = result.scalar_one_or_none()
     if not solicitud:
         raise HTTPException(status_code=404, detail="Solicitud no encontrada")
-    if usuario.rol == Rol.ESTUDIANTE and solicitud.estudiante_id != usuario.id:
-        raise HTTPException(status_code=403, detail="Sin permisos")
     return solicitud
 
 
-async def _subir_documento(
-    solicitud_id: UUID,
-    file: UploadFile,
-    tipo: TipoDocumento,
+async def _verificar_scope(
+    solicitud: Solicitud, usuario: Usuario
+) -> None:
+    """Estudiante solo puede ver/tocar sus propias solicitudes."""
+    if usuario.rol == Rol.ESTUDIANTE and solicitud.estudiante_id != usuario.id:
+        raise HTTPException(status_code=403, detail="Sin permisos sobre esta solicitud")
+
+
+async def _upsert_documento(
     db: AsyncSession,
-    usuario: Usuario,
+    solicitud_id: UUID,
+    tipo: TipoDocumento,
+    file: UploadFile,
 ) -> Documento:
-    validar_pdf(file)
+    """Crea o reemplaza el documento de un tipo dado para una solicitud."""
+    ruta, tamano = await _guardar_archivo(file, solicitud_id, tipo)
 
-    result = await db.execute(select(Solicitud).where(Solicitud.id == solicitud_id))
-    solicitud = result.scalar_one_or_none()
-
-    if not solicitud:
-        raise HTTPException(status_code=404, detail="Solicitud no encontrada")
-    if solicitud.estudiante_id != usuario.id:
-        raise HTTPException(status_code=403, detail="Sin permisos")
-    if solicitud.estado not in [
-        EstadoSolicitud.BORRADOR,
-        EstadoSolicitud.ENVIADA,
-        EstadoSolicitud.EN_REVISION,
-    ]:
-        raise HTTPException(status_code=400, detail="No se pueden subir documentos en este estado")
-
-    ruta, tamano = await guardar_archivo(file, solicitud_id, tipo)
-
-    result_doc = await db.execute(
+    result = await db.execute(
         select(Documento).where(
             Documento.solicitud_id == solicitud_id,
             Documento.tipo == tipo,
         )
     )
-    doc_existente = result_doc.scalar_one_or_none()
+    doc = result.scalar_one_or_none()
 
-    if doc_existente:
-        doc_existente.nombre_original = file.filename
-        doc_existente.ruta = ruta
-        doc_existente.tamano_bytes = tamano
-        await db.commit()
-        await db.refresh(doc_existente)
-        return doc_existente
+    if doc:
+        doc.nombre_original = file.filename
+        doc.ruta = ruta
+        doc.tamano_bytes = tamano
+    else:
+        doc = Documento(
+            solicitud_id=solicitud_id,
+            tipo=tipo,
+            nombre_original=file.filename,
+            ruta=ruta,
+            mime_type=ALLOWED_MIME,
+            tamano_bytes=tamano,
+        )
+        db.add(doc)
 
-    documento = Documento(
-        solicitud_id=solicitud_id,
-        tipo=tipo,
-        nombre_original=file.filename,
-        ruta=ruta,
-        mime_type=ALLOWED_MIME,
-        tamano_bytes=tamano,
-    )
-    db.add(documento)
     await db.commit()
-    await db.refresh(documento)
-    return documento
+    await db.refresh(doc)
+    return doc
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Endpoints — Estudiante
+# ──────────────────────────────────────────────────────────────────────────────
 
 @router.post(
-    "/{solicitud_id}/pensum-origen",
+    "/{solicitud_id}/notas",
     status_code=status.HTTP_201_CREATED,
-    summary="Subir pensum de origen",
-    description="El estudiante sube el PDF del pensum de la institución de origen.",
+    summary="Subir certificado de notas (Estudiante)",
+    description=(
+        "El estudiante sube su certificado oficial de calificaciones o hoja de vida "
+        "académica en PDF. Este documento es el **pensum de origen** que la IA analizará. "
+        "Puede resubirse para reemplazar el anterior. "
+        "Solo disponible en estados: BORRADOR, ENVIADA, EN_REVISION."
+    ),
     responses={
-        201: {"description": "Documento subido"},
-        400: {"description": "No es PDF, archivo vacío o tamaño excedido"},
-        403: {"description": "Solo el dueño de la solicitud puede subir documentos"},
+        201: {"description": "Certificado de notas subido"},
+        400: {"description": "No es PDF, vacío, excede tamaño o estado incorrecto"},
+        403: {"description": "Solo el dueño de la solicitud puede subir este documento"},
+        404: {"description": "Solicitud no encontrada"},
     },
 )
-async def subir_pensum_origen(
+async def subir_notas_estudiante(
     solicitud_id: UUID,
-    file: UploadFile = File(...),
+    file: UploadFile = File(..., description="Certificado de calificaciones en PDF"),
     db: AsyncSession = Depends(get_db),
     usuario: Usuario = Depends(require_rol(Rol.ESTUDIANTE)),
 ):
-    return await _subir_documento(solicitud_id, file, TipoDocumento.PENSUM_ORIGEN, db, usuario)
+    _validar_pdf(file)
+    solicitud = await _obtener_solicitud(solicitud_id, db)
 
+    if solicitud.estudiante_id != usuario.id:
+        raise HTTPException(status_code=403, detail="Sin permisos sobre esta solicitud")
+
+    estados_permitidos = [
+        EstadoSolicitud.BORRADOR,
+        EstadoSolicitud.ENVIADA,
+        EstadoSolicitud.EN_REVISION,
+    ]
+    if solicitud.estado not in estados_permitidos:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se pueden subir documentos en estado '{solicitud.estado.value}'"
+        )
+
+    return await _upsert_documento(db, solicitud_id, TipoDocumento.PENSUM_ORIGEN, file)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Endpoints — Coordinador
+# ──────────────────────────────────────────────────────────────────────────────
 
 @router.post(
     "/{solicitud_id}/pensum-destino",
     status_code=status.HTTP_201_CREATED,
-    summary="Subir pensum de destino",
-    description="El estudiante sube el PDF del pensum de la institución de destino.",
+    summary="Subir pensum destino (Coordinador)",
+    description=(
+        "El coordinador sube el plan de estudios (pensum) del programa al que el "
+        "estudiante desea trasladarse. Este PDF es el que la IA usará como referencia "
+        "para determinar equivalencias. "
+        "Solo disponible en estado: EN_REVISION."
+    ),
     responses={
-        201: {"description": "Documento subido"},
-        400: {"description": "No es PDF, archivo vacío o tamaño excedido"},
-        403: {"description": "Solo el dueño de la solicitud puede subir documentos"},
+        201: {"description": "Pensum destino subido"},
+        400: {"description": "No es PDF, vacío, excede tamaño o solicitud no está EN_REVISION"},
+        403: {"description": "Solo coordinadores pueden subir el pensum destino"},
+        404: {"description": "Solicitud no encontrada"},
     },
 )
 async def subir_pensum_destino(
     solicitud_id: UUID,
-    file: UploadFile = File(...),
+    file: UploadFile = File(..., description="Plan de estudios del programa destino en PDF"),
     db: AsyncSession = Depends(get_db),
-    usuario: Usuario = Depends(require_rol(Rol.ESTUDIANTE)),
+    usuario: Usuario = Depends(require_rol(Rol.COORDINADOR)),
 ):
-    return await _subir_documento(solicitud_id, file, TipoDocumento.PENSUM_DESTINO, db, usuario)
+    _validar_pdf(file)
+    solicitud = await _obtener_solicitud(solicitud_id, db)
 
+    if solicitud.estado != EstadoSolicitud.EN_REVISION:
+        raise HTTPException(
+            status_code=400,
+            detail="El pensum destino solo se puede subir cuando la solicitud está EN_REVISION"
+        )
+
+    return await _upsert_documento(db, solicitud_id, TipoDocumento.PENSUM_DESTINO, file)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Endpoints — Lectura (todos los roles con scope)
+# ──────────────────────────────────────────────────────────────────────────────
 
 @router.get(
     "/{solicitud_id}",
-    summary="Listar documentos",
-    description="Lista los documentos de una solicitud. El estudiante solo ve los suyos.",
+    summary="Listar documentos de una solicitud",
+    description=(
+        "Retorna los documentos subidos para una solicitud. "
+        "El estudiante solo ve los de sus propias solicitudes."
+    ),
     responses={
         404: {"description": "Solicitud no encontrada"},
         403: {"description": "Sin permisos"},
@@ -166,12 +235,13 @@ async def listar_documentos(
     db: AsyncSession = Depends(get_db),
     usuario: Usuario = Depends(get_current_user),
 ):
-    await _obtener_solicitud_con_permiso(solicitud_id, usuario, db)
+    solicitud = await _obtener_solicitud(solicitud_id, db)
+    await _verificar_scope(solicitud, usuario)
 
-    result_docs = await db.execute(
+    result = await db.execute(
         select(Documento).where(Documento.solicitud_id == solicitud_id)
     )
-    return result_docs.scalars().all()
+    return result.scalars().all()
 
 
 @router.get(
@@ -183,7 +253,7 @@ async def listar_documentos(
     ),
     responses={
         200: {"description": "Archivo PDF"},
-        404: {"description": "Documento no encontrado"},
+        404: {"description": "Documento no encontrado o archivo no existe en disco"},
         403: {"description": "Sin permisos"},
     },
 )
@@ -193,7 +263,8 @@ async def descargar_documento(
     db: AsyncSession = Depends(get_db),
     usuario: Usuario = Depends(get_current_user),
 ):
-    await _obtener_solicitud_con_permiso(solicitud_id, usuario, db)
+    solicitud = await _obtener_solicitud(solicitud_id, db)
+    await _verificar_scope(solicitud, usuario)
 
     result = await db.execute(
         select(Documento).where(
@@ -202,11 +273,15 @@ async def descargar_documento(
         )
     )
     documento = result.scalar_one_or_none()
+
     if not documento:
         raise HTTPException(status_code=404, detail="Documento no encontrado")
 
     if not os.path.exists(documento.ruta):
-        raise HTTPException(status_code=404, detail="Archivo no encontrado en el servidor")
+        raise HTTPException(
+            status_code=404,
+            detail="El archivo no existe en el servidor. Contacta al administrador."
+        )
 
     return FileResponse(
         path=documento.ruta,

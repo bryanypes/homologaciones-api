@@ -8,7 +8,6 @@ import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
-from unittest.mock import AsyncMock, patch, MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -41,8 +40,8 @@ async def override_get_db():
 
 
 # ── Datos de test ──────────────────────────────────────────────
-RECTOR_EMAIL = "rector_test@unicauca.edu.co"
-RECTOR_PASSWORD = "Test1234!"
+RECTOR_EMAIL = "rector@universidad.edu.co"
+RECTOR_PASSWORD = "Rector2024!"
 
 ESTUDIANTE = {
     "nombre": "Carlos",
@@ -68,7 +67,6 @@ def app_test():
     - Kafka mockeado
     - Lifespan reemplazado para no conectar a servicios externos
     """
-    # Mockear Redis antes de importar la app
     _blacklist: dict = {}
 
     fake_redis = AsyncMock()
@@ -77,16 +75,16 @@ def app_test():
     fake_redis.delete = AsyncMock(side_effect=lambda key: _blacklist.pop(key, None))
     fake_redis.aclose = AsyncMock()
 
-    # Mockear Kafka worker para que no intente conectar
+    # FIX: publicar_cambio_estado y publicar_homologacion_completada son funciones
+    # síncronas — deben mockearse con MagicMock, no AsyncMock.
     with patch("app.workers.homologacion_worker.iniciar_worker_en_background", return_value=None), \
          patch("app.core.deps.aioredis.from_url", return_value=fake_redis), \
-         patch("app.services.kafka_service.publicar_cambio_estado", new_callable=AsyncMock), \
-         patch("app.services.kafka_service.publicar_homologacion_completada", new_callable=AsyncMock):
+         patch("app.services.kafka_service.publicar_cambio_estado", new_callable=MagicMock), \
+         patch("app.services.kafka_service.publicar_homologacion_completada", new_callable=MagicMock):
 
         from app.main import app
         from app.core.database import Base, get_db
 
-        # Override de DB
         app.dependency_overrides[get_db] = override_get_db
 
         yield app
@@ -104,7 +102,6 @@ async def setup_db(app_test):
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    # Crear rector directamente en DB (no existe endpoint público para esto)
     async with TestSessionLocal() as db:
         rector = Usuario(
             nombre="Pedro",
@@ -198,7 +195,6 @@ async def solicitud_id(client: AsyncClient, token_estudiante: str) -> str:
 @pytest.fixture(scope="session")
 async def solicitud_enviada_id(client: AsyncClient, token_estudiante: str) -> str:
     """Solicitud separada con PDFs subidos y enviada — para tests de flujo."""
-    # Crear
     crear = await client.post(
         "/api/v1/solicitudes/",
         headers={"Authorization": f"Bearer {token_estudiante}"},
@@ -207,7 +203,6 @@ async def solicitud_enviada_id(client: AsyncClient, token_estudiante: str) -> st
     assert crear.status_code == 201, f"Crear solicitud enviada falló: {crear.text}"
     sid = crear.json()["id"]
 
-    # Subir PDFs mínimos
     pdf = b"%PDF-1.4 fake pdf content"
     for tipo in ("pensum-origen", "pensum-destino"):
         up = await client.post(
@@ -217,7 +212,6 @@ async def solicitud_enviada_id(client: AsyncClient, token_estudiante: str) -> st
         )
         assert up.status_code == 201, f"Subir {tipo} falló: {up.text}"
 
-    # Enviar
     enviar = await client.patch(
         f"/api/v1/solicitudes/{sid}/enviar",
         headers={"Authorization": f"Bearer {token_estudiante}"},

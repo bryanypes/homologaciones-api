@@ -23,6 +23,7 @@ dependencies = [
     "google-genai>=2.8.0",
     "openai>=2.41.0",
     "aiosmtplib>=5.1.1",
+    "pypdf>=6.13.2",
 ]
 
 [dependency-groups]
