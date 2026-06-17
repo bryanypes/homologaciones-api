@@ -25,7 +25,15 @@ def publicar_evento(topic: str, key: str, payload: dict) -> None:
         print(f"[Kafka] Error publicando evento en {topic}: {e}")
 
 
-def publicar_cambio_estado(solicitud_id: str, estado_anterior: str, estado_nuevo: str, usuario_id: str) -> None:
+def publicar_cambio_estado(
+    solicitud_id: str,
+    estado_anterior: str,
+    estado_nuevo: str,
+    usuario_id: str,
+    email_estudiante: str = "",
+    nombre_estudiante: str = "",
+    observacion: str = None,
+):
     publicar_evento(
         topic=TOPIC_SOLICITUDES,
         key=solicitud_id,
@@ -38,7 +46,9 @@ def publicar_cambio_estado(solicitud_id: str, estado_anterior: str, estado_nuevo
     )
 
 
-def publicar_homologacion_completada(solicitud_id: str, homologacion_id: str, tokens: int) -> None:
+def publicar_homologacion_completada(
+    solicitud_id: str, homologacion_id: str, tokens: int
+) -> None:
     publicar_evento(
         topic=TOPIC_HOMOLOGACIONES,
         key=solicitud_id,

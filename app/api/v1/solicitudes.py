@@ -11,7 +11,7 @@ from app.core.deps import get_current_user, require_rol
 from app.models.usuario import Usuario, Rol
 from app.models.solicitud import Solicitud, EstadoSolicitud, HistorialEstado
 from app.models.documento import Documento, TipoDocumento
-from app.models.academico import Programa
+from app.models.academico import Programa, Institucion
 from app.schemas.solicitud import SolicitudCreate, SolicitudResponse, CambiarEstadoRequest
 from app.schemas.paginacion import PaginatedResponse
 from app.services.kafka_service import publicar_cambio_estado
@@ -19,8 +19,13 @@ from app.services.kafka_service import publicar_cambio_estado
 router = APIRouter(prefix="/solicitudes", tags=["Solicitudes"])
 
 
-async def _poblar_desde_catalogo(db: AsyncSession, programa_id, texto_nombre, texto_institucion):
-    """Retorna (nombre_programa, nombre_institucion) desde el catálogo si existe el ID."""
+# ──────────────────────────────────────────────────────────────────────────────
+# Helpers
+# ──────────────────────────────────────────────────────────────────────────────
+
+async def _poblar_desde_catalogo(
+    db: AsyncSession, programa_id, texto_nombre, texto_institucion
+):
     if not programa_id:
         return texto_nombre, texto_institucion
     result = await db.execute(
@@ -34,51 +39,113 @@ async def _poblar_desde_catalogo(db: AsyncSession, programa_id, texto_nombre, te
     return texto_nombre, texto_institucion
 
 
-async def _verificar_ambos_pdfs(db: AsyncSession, solicitud_id) -> None:
-    """Lanza HTTPException 400 si faltan uno o ambos PDFs."""
+async def _buscar_programa_por_nombre(
+    db: AsyncSession,
+    nombre: Optional[str],
+    nombre_institucion: Optional[str],
+) -> Optional[UUID]:
+    """
+    Busca un programa por nombre (ilike) y opcionalmente filtra por institución.
+    Retorna el ID del primer match o None.
+    """
+    if not nombre:
+        return None
+
+    stmt = select(Programa).where(Programa.nombre.ilike(nombre))
+
+    if nombre_institucion:
+        stmt = stmt.join(Programa.institucion).where(
+            Institucion.nombre.ilike(nombre_institucion)
+        )
+
+    result = await db.execute(stmt.limit(1))
+    prog = result.scalars().first()
+    return prog.id if prog else None
+
+
+async def _verificar_notas_subidas(db: AsyncSession, solicitud_id: UUID) -> None:
+    """
+    Verifica que el estudiante haya subido su certificado de notas (pensum_origen).
+    El pensum_destino lo sube el coordinador después — no se valida aquí.
+    """
+    result = await db.execute(
+        select(Documento.tipo).where(Documento.solicitud_id == solicitud_id)
+    )
+    tipos = {row[0] for row in result.fetchall()}
+
+    if TipoDocumento.PENSUM_ORIGEN not in tipos:
+        raise HTTPException(
+            status_code=400,
+            detail="Debes subir tu certificado de notas antes de enviar la solicitud. "
+                   "Usa el endpoint POST /documentos/{id}/notas",
+        )
+
+
+async def _verificar_ambos_pdfs(db: AsyncSession, solicitud_id: UUID) -> None:
+    """
+    Verifica que existan AMBOS PDFs antes de activar la IA.
+    Llamado desde homologaciones.py al procesar.
+    """
     result = await db.execute(
         select(Documento.tipo).where(Documento.solicitud_id == solicitud_id)
     )
     tipos = {row[0] for row in result.fetchall()}
     faltantes = []
     if TipoDocumento.PENSUM_ORIGEN not in tipos:
-        faltantes.append("pensum de origen")
+        faltantes.append("certificado de notas del estudiante")
     if TipoDocumento.PENSUM_DESTINO not in tipos:
-        faltantes.append("pensum de destino")
+        faltantes.append("pensum del programa destino")
     if faltantes:
         raise HTTPException(
             status_code=400,
-            detail=f"Faltan documentos requeridos: {', '.join(faltantes)}",
+            detail=f"Faltan documentos para procesar con IA: {', '.join(faltantes)}",
         )
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Endpoints
+# ──────────────────────────────────────────────────────────────────────────────
 
 @router.post(
     "/",
     response_model=SolicitudResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Crear solicitud",
-    description="El estudiante crea una nueva solicitud. Puede usar IDs del catálogo o texto libre.",
-    responses={
-        201: {"description": "Solicitud creada"},
-        403: {"description": "Solo estudiantes pueden crear solicitudes"},
-    },
+    description="El estudiante crea una nueva solicitud de homologación.",
 )
 async def crear_solicitud(
     data: SolicitudCreate,
     db: AsyncSession = Depends(get_db),
     usuario: Usuario = Depends(require_rol(Rol.ESTUDIANTE)),
 ):
+    programa_origen_id = data.programa_origen_id
+    programa_destino_id = data.programa_destino_id
+
+    # Buscar por nombre + institución si no se proporcionó ID
+    if not programa_origen_id:
+        programa_origen_id = await _buscar_programa_por_nombre(
+            db, data.programa_origen, data.institucion_origen
+        )
+
+    if not programa_destino_id:
+        programa_destino_id = await _buscar_programa_por_nombre(
+            db, data.programa_destino, data.institucion_destino
+        )
+
     programa_origen, institucion_origen = await _poblar_desde_catalogo(
-        db, data.programa_origen_id, data.programa_origen, data.institucion_origen
+        db, programa_origen_id, data.programa_origen, data.institucion_origen
     )
     programa_destino, institucion_destino = await _poblar_desde_catalogo(
-        db, data.programa_destino_id, data.programa_destino, data.institucion_destino
+        db, programa_destino_id, data.programa_destino, data.institucion_destino
     )
 
     solicitud = Solicitud(
         estudiante_id=usuario.id,
-        programa_origen_id=data.programa_origen_id,
-        programa_destino_id=data.programa_destino_id,
+        cedula=data.cedula,
+        telefono=data.telefono,
+        correo_contacto=data.correo_contacto,
+        programa_origen_id=programa_origen_id,
+        programa_destino_id=programa_destino_id,
         institucion_origen=institucion_origen,
         programa_origen=programa_origen,
         institucion_destino=institucion_destino,
@@ -96,17 +163,17 @@ async def crear_solicitud(
     response_model=PaginatedResponse[SolicitudResponse],
     summary="Listar solicitudes",
     description=(
-        "Estudiantes ven solo sus solicitudes. Coordinadores y rectores ven todas. "
-        "Soporta filtros por estado, programa y fecha, con paginación."
+        "Estudiantes ven solo las suyas. Coordinadores y rectores ven todas. "
+        "Filtros: estado, programa destino, fecha. Paginación incluida."
     ),
 )
 async def listar_solicitudes(
-    estado: Optional[EstadoSolicitud] = Query(None, description="Filtrar por estado"),
-    programa_destino_id: Optional[UUID] = Query(None, description="Filtrar por programa destino"),
-    fecha_desde: Optional[date] = Query(None, description="Fecha mínima de creación (YYYY-MM-DD)"),
-    fecha_hasta: Optional[date] = Query(None, description="Fecha máxima de creación (YYYY-MM-DD)"),
-    page: int = Query(1, ge=1, description="Número de página"),
-    size: int = Query(20, ge=1, le=100, description="Resultados por página"),
+    estado: Optional[EstadoSolicitud] = Query(None),
+    programa_destino_id: Optional[UUID] = Query(None),
+    fecha_desde: Optional[date] = Query(None),
+    fecha_hasta: Optional[date] = Query(None),
+    page: int = Query(1, ge=1),
+    size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     usuario: Usuario = Depends(get_current_user),
 ):
@@ -130,13 +197,11 @@ async def listar_solicitudes(
         query = query.where(Solicitud.creado_en <= fecha_hasta)
         count_query = count_query.where(Solicitud.creado_en <= fecha_hasta)
 
-    total_result = await db.execute(count_query)
-    total = total_result.scalar_one()
-
+    total = (await db.execute(count_query)).scalar_one()
     offset = (page - 1) * size
-    query = query.order_by(Solicitud.creado_en.desc()).offset(offset).limit(size)
-    result = await db.execute(query)
-    items = result.scalars().all()
+    items = (await db.execute(
+        query.order_by(Solicitud.creado_en.desc()).offset(offset).limit(size)
+    )).scalars().all()
 
     return PaginatedResponse(total=total, page=page, size=size, items=items)
 
@@ -145,11 +210,6 @@ async def listar_solicitudes(
     "/{solicitud_id}",
     response_model=SolicitudResponse,
     summary="Obtener solicitud",
-    description="Retorna el detalle de una solicitud. El estudiante solo puede ver las suyas.",
-    responses={
-        404: {"description": "Solicitud no encontrada"},
-        403: {"description": "Sin permisos para ver esta solicitud"},
-    },
 )
 async def obtener_solicitud(
     solicitud_id: UUID,
@@ -158,21 +218,16 @@ async def obtener_solicitud(
 ):
     result = await db.execute(select(Solicitud).where(Solicitud.id == solicitud_id))
     solicitud = result.scalar_one_or_none()
-
     if not solicitud:
         raise HTTPException(status_code=404, detail="Solicitud no encontrada")
-
     if usuario.rol == Rol.ESTUDIANTE and solicitud.estudiante_id != usuario.id:
         raise HTTPException(status_code=403, detail="Sin permisos")
-
     return solicitud
 
 
 @router.get(
     "/{solicitud_id}/historial",
     summary="Historial de estados",
-    description="Retorna el historial completo de cambios de estado de una solicitud.",
-    responses={404: {"description": "Solicitud no encontrada"}},
 )
 async def historial_solicitud(
     solicitud_id: UUID,
@@ -199,14 +254,10 @@ async def historial_solicitud(
     response_model=SolicitudResponse,
     summary="Enviar solicitud",
     description=(
-        "El estudiante envía su solicitud para revisión. "
-        "Requiere que ambos PDFs (pensum origen y destino) estén subidos."
+        "El estudiante envía la solicitud para revisión. "
+        "**Requiere que el certificado de notas esté subido.** "
+        "El coordinador subirá el pensum destino después."
     ),
-    responses={
-        400: {"description": "Estado incorrecto o faltan documentos PDF"},
-        403: {"description": "Solo el estudiante dueño puede enviar"},
-        404: {"description": "Solicitud no encontrada"},
-    },
 )
 async def enviar_solicitud(
     solicitud_id: UUID,
@@ -215,18 +266,14 @@ async def enviar_solicitud(
 ):
     result = await db.execute(select(Solicitud).where(Solicitud.id == solicitud_id))
     solicitud = result.scalar_one_or_none()
-
     if not solicitud:
         raise HTTPException(status_code=404, detail="Solicitud no encontrada")
-
     if solicitud.estudiante_id != usuario.id:
         raise HTTPException(status_code=403, detail="Sin permisos")
-
     if solicitud.estado != EstadoSolicitud.BORRADOR:
-        raise HTTPException(status_code=400, detail="Solo se pueden enviar solicitudes en borrador")
+        raise HTTPException(status_code=400, detail="Solo se pueden enviar solicitudes en BORRADOR")
 
-    # Validar que ambos PDFs estén subidos antes de enviar
-    await _verificar_ambos_pdfs(db, solicitud_id)
+    await _verificar_notas_subidas(db, solicitud_id)
 
     historial = HistorialEstado(
         solicitud_id=solicitud.id,
@@ -243,6 +290,8 @@ async def enviar_solicitud(
         estado_anterior=EstadoSolicitud.BORRADOR.value,
         estado_nuevo=EstadoSolicitud.ENVIADA.value,
         usuario_id=str(usuario.id),
+        email_estudiante=getattr(solicitud, "correo_contacto", "") or "",
+        nombre_estudiante=f"{usuario.nombre} {usuario.apellido}",
     )
     return solicitud
 
@@ -251,12 +300,10 @@ async def enviar_solicitud(
     "/{solicitud_id}/revisar",
     response_model=SolicitudResponse,
     summary="Tomar en revisión",
-    description="El coordinador toma la solicitud para revisión. Solo aplica si está en estado ENVIADA.",
-    responses={
-        400: {"description": "La solicitud no está en estado ENVIADA"},
-        403: {"description": "Solo coordinadores pueden revisar"},
-        404: {"description": "Solicitud no encontrada"},
-    },
+    description=(
+        "El coordinador toma la solicitud. "
+        "Después de esto debe subir el pensum destino antes de activar la IA."
+    ),
 )
 async def tomar_revision(
     solicitud_id: UUID,
@@ -266,10 +313,8 @@ async def tomar_revision(
 ):
     result = await db.execute(select(Solicitud).where(Solicitud.id == solicitud_id))
     solicitud = result.scalar_one_or_none()
-
     if not solicitud:
         raise HTTPException(status_code=404, detail="Solicitud no encontrada")
-
     if solicitud.estado != EstadoSolicitud.ENVIADA:
         raise HTTPException(status_code=400, detail="La solicitud debe estar en estado ENVIADA")
 
@@ -289,6 +334,8 @@ async def tomar_revision(
         estado_anterior=EstadoSolicitud.ENVIADA.value,
         estado_nuevo=EstadoSolicitud.EN_REVISION.value,
         usuario_id=str(usuario.id),
+        email_estudiante=getattr(solicitud, "correo_contacto", "") or "",
+        nombre_estudiante="",
     )
     return solicitud
 
@@ -297,12 +344,6 @@ async def tomar_revision(
     "/{solicitud_id}/aprobar",
     response_model=SolicitudResponse,
     summary="Aprobar homologación",
-    description="El rector aprueba la homologación. Solo aplica si está en estado PENDIENTE_RECTOR.",
-    responses={
-        400: {"description": "La solicitud no está en estado PENDIENTE_RECTOR"},
-        403: {"description": "Solo el rector puede aprobar"},
-        404: {"description": "Solicitud no encontrada"},
-    },
 )
 async def aprobar_solicitud(
     solicitud_id: UUID,
@@ -312,12 +353,10 @@ async def aprobar_solicitud(
 ):
     result = await db.execute(select(Solicitud).where(Solicitud.id == solicitud_id))
     solicitud = result.scalar_one_or_none()
-
     if not solicitud:
         raise HTTPException(status_code=404, detail="Solicitud no encontrada")
-
     if solicitud.estado != EstadoSolicitud.PENDIENTE_RECTOR:
-        raise HTTPException(status_code=400, detail="La solicitud debe estar en estado PENDIENTE_RECTOR")
+        raise HTTPException(status_code=400, detail="La solicitud debe estar en PENDIENTE_RECTOR")
 
     historial = HistorialEstado(
         solicitud_id=solicitud.id,
@@ -335,6 +374,9 @@ async def aprobar_solicitud(
         estado_anterior=EstadoSolicitud.PENDIENTE_RECTOR.value,
         estado_nuevo=EstadoSolicitud.APROBADA.value,
         usuario_id=str(usuario.id),
+        email_estudiante=getattr(solicitud, "correo_contacto", "") or "",
+        nombre_estudiante="",
+        observacion=data.observacion,
     )
     return solicitud
 
@@ -343,12 +385,6 @@ async def aprobar_solicitud(
     "/{solicitud_id}/rechazar",
     response_model=SolicitudResponse,
     summary="Rechazar homologación",
-    description="El rector rechaza la homologación. Solo aplica si está en estado PENDIENTE_RECTOR.",
-    responses={
-        400: {"description": "La solicitud no está en estado PENDIENTE_RECTOR"},
-        403: {"description": "Solo el rector puede rechazar"},
-        404: {"description": "Solicitud no encontrada"},
-    },
 )
 async def rechazar_solicitud(
     solicitud_id: UUID,
@@ -358,12 +394,10 @@ async def rechazar_solicitud(
 ):
     result = await db.execute(select(Solicitud).where(Solicitud.id == solicitud_id))
     solicitud = result.scalar_one_or_none()
-
     if not solicitud:
         raise HTTPException(status_code=404, detail="Solicitud no encontrada")
-
     if solicitud.estado != EstadoSolicitud.PENDIENTE_RECTOR:
-        raise HTTPException(status_code=400, detail="La solicitud debe estar en estado PENDIENTE_RECTOR")
+        raise HTTPException(status_code=400, detail="La solicitud debe estar en PENDIENTE_RECTOR")
 
     historial = HistorialEstado(
         solicitud_id=solicitud.id,
@@ -381,5 +415,8 @@ async def rechazar_solicitud(
         estado_anterior=EstadoSolicitud.PENDIENTE_RECTOR.value,
         estado_nuevo=EstadoSolicitud.RECHAZADA.value,
         usuario_id=str(usuario.id),
+        email_estudiante=getattr(solicitud, "correo_contacto", "") or "",
+        nombre_estudiante="",
+        observacion=data.observacion,
     )
     return solicitud

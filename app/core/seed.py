@@ -157,3 +157,5 @@ async def seed_academico(db: AsyncSession, deptos_map: dict) -> None:
             institucion_id=instituciones_map[inst_idx],
             facultad_id=facultades_map[fac_idx] if fac_idx else None,
         ))
+
+        
