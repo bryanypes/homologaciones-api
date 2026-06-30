@@ -16,8 +16,6 @@ build/
 # Uploads
 uploads/
 
-# Alembic
-alembic/versions/
 
 # IDE
 .vscode/

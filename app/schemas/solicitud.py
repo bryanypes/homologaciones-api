@@ -6,20 +6,21 @@ from app.models.solicitud import EstadoSolicitud
 
 
 class SolicitudCreate(BaseModel):
+    """Crear solicitud con opción de elegir de catálogo o escribir texto libre"""
     # Datos personales del estudiante (capturados en la solicitud)
     cedula: Optional[str] = None
     telefono: Optional[str] = None
     correo_contacto: Optional[EmailStr] = None
 
-    # Programa origen (texto libre o FK)
-    institucion_origen: Optional[str] = None
-    programa_origen: Optional[str] = None
-    programa_origen_id: Optional[UUID] = None
+    # Programa origen: elegir de catálogo O escribir texto libre
+    programa_origen_id: Optional[UUID] = None  # Si se elige del catálogo
+    institucion_origen_texto: Optional[str] = None  # Si es "Otra"
+    programa_origen_texto: Optional[str] = None  # Si es "Otra"
 
-    # Programa destino (texto libre o FK)
-    institucion_destino: Optional[str] = None
-    programa_destino: Optional[str] = None
-    programa_destino_id: Optional[UUID] = None
+    # Programa destino: elegir de catálogo O escribir texto libre
+    programa_destino_id: Optional[UUID] = None  # Si se elige del catálogo
+    institucion_destino_texto: Optional[str] = None  # Si es "Otra"
+    programa_destino_texto: Optional[str] = None  # Si es "Otra"
 
     @field_validator("cedula")
     @classmethod
@@ -54,3 +55,15 @@ class SolicitudResponse(BaseModel):
 
 class CambiarEstadoRequest(BaseModel):
     observacion: Optional[str] = None
+
+
+class HistorialEstadoResponse(BaseModel):
+    id: UUID
+    estado_anterior: Optional[EstadoSolicitud] = None
+    estado_nuevo: EstadoSolicitud
+    observacion: Optional[str] = None
+    creado_en: datetime
+    usuario_id: UUID
+    usuario_nombre: Optional[str] = None
+
+    model_config = {"from_attributes": True}

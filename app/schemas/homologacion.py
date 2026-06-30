@@ -5,6 +5,11 @@ from typing import Optional
 from app.models.homologacion import EstadoAsignatura
 
 
+class ActualizarAsignaturaRequest(BaseModel):
+    estado: EstadoAsignatura
+    justificacion: Optional[str] = None
+
+
 class HomologacionAsignaturaResponse(BaseModel):
     id: uuid.UUID
     asignatura_origen: str
