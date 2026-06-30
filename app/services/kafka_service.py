@@ -42,12 +42,19 @@ def publicar_cambio_estado(
             "estado_anterior": estado_anterior,
             "estado_nuevo": estado_nuevo,
             "usuario_id": usuario_id,
+            "email_estudiante": email_estudiante,
+            "nombre_estudiante": nombre_estudiante,
+            "observacion": observacion,
         },
     )
 
 
 def publicar_homologacion_completada(
-    solicitud_id: str, homologacion_id: str, tokens: int
+    solicitud_id: str,
+    homologacion_id: str,
+    tokens: int,
+    email_estudiante: str = "",
+    nombre_estudiante: str = "",
 ) -> None:
     publicar_evento(
         topic=TOPIC_HOMOLOGACIONES,
@@ -56,5 +63,7 @@ def publicar_homologacion_completada(
             "solicitud_id": solicitud_id,
             "homologacion_id": homologacion_id,
             "tokens_utilizados": tokens,
+            "email_estudiante": email_estudiante,
+            "nombre_estudiante": nombre_estudiante,
         },
     )

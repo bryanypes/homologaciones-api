@@ -1,19 +1,3 @@
-"""
-documentos.py
-
-Endpoints de gestión de documentos PDF.
-
-Responsabilidades por rol:
-  - Estudiante: sube sus NOTAS (certificado de calificaciones) como pensum_origen
-  - Coordinador: sube el PENSUM DESTINO del programa al que aplica el estudiante
-  - Todos los roles autenticados: listar documentos de una solicitud (con scope)
-  - Todos los roles autenticados: descargar un PDF específico (con scope)
-
-Estados permitidos para subir documentos:
-  - Estudiante puede subir en: BORRADOR, ENVIADA, EN_REVISION
-  - Coordinador puede subir pensum destino en: EN_REVISION
-"""
-
 import os
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
 from fastapi.responses import FileResponse
@@ -27,6 +11,7 @@ from app.core.config import settings
 from app.models.usuario import Usuario, Rol
 from app.models.solicitud import Solicitud, EstadoSolicitud
 from app.models.documento import Documento, TipoDocumento
+from app.schemas.documento import DocumentoResponse
 
 router = APIRouter(prefix="/documentos", tags=["Documentos"])
 
@@ -36,6 +21,11 @@ ALLOWED_MIME = "application/pdf"
 # ──────────────────────────────────────────────────────────────────────────────
 # Helpers internos
 # ──────────────────────────────────────────────────────────────────────────────
+
+def _generar_url_documento(solicitud_id: UUID, documento_id: UUID) -> str:
+    """Genera la URL pública para descargar un documento"""
+    return f"{settings.BASE_URL}/api/v1/documentos/{solicitud_id}/{documento_id}/descargar"
+
 
 def _validar_pdf(file: UploadFile) -> None:
     if file.content_type != ALLOWED_MIME:
@@ -128,12 +118,27 @@ async def _upsert_documento(
     return doc
 
 
+def _documento_a_response(doc: Documento) -> DocumentoResponse:
+    """Convierte un modelo Documento a DocumentoResponse con URL"""
+    return DocumentoResponse(
+        id=doc.id,
+        solicitud_id=doc.solicitud_id,
+        tipo=doc.tipo,
+        nombre_original=doc.nombre_original,
+        mime_type=doc.mime_type,
+        tamano_bytes=doc.tamano_bytes,
+        url=_generar_url_documento(doc.solicitud_id, doc.id),
+        creado_en=doc.creado_en,
+    )
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Endpoints — Estudiante
 # ──────────────────────────────────────────────────────────────────────────────
 
 @router.post(
     "/{solicitud_id}/notas",
+    response_model=DocumentoResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Subir certificado de notas (Estudiante)",
     description=(
@@ -172,7 +177,8 @@ async def subir_notas_estudiante(
             detail=f"No se pueden subir documentos en estado '{solicitud.estado.value}'"
         )
 
-    return await _upsert_documento(db, solicitud_id, TipoDocumento.PENSUM_ORIGEN, file)
+    doc = await _upsert_documento(db, solicitud_id, TipoDocumento.PENSUM_ORIGEN, file)
+    return _documento_a_response(doc)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -181,17 +187,18 @@ async def subir_notas_estudiante(
 
 @router.post(
     "/{solicitud_id}/pensum-destino",
+    response_model=DocumentoResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Subir pensum destino (Coordinador)",
     description=(
         "El coordinador sube el plan de estudios (pensum) del programa al que el "
         "estudiante desea trasladarse. Este PDF es el que la IA usará como referencia "
         "para determinar equivalencias. "
-        "Solo disponible en estado: EN_REVISION."
+        "Disponible en estados: EN_REVISION o REVISION_COORDINADOR (para reprocesar)."
     ),
     responses={
         201: {"description": "Pensum destino subido"},
-        400: {"description": "No es PDF, vacío, excede tamaño o solicitud no está EN_REVISION"},
+        400: {"description": "No es PDF, vacío, excede tamaño o estado no permitido"},
         403: {"description": "Solo coordinadores pueden subir el pensum destino"},
         404: {"description": "Solicitud no encontrada"},
     },
@@ -205,13 +212,15 @@ async def subir_pensum_destino(
     _validar_pdf(file)
     solicitud = await _obtener_solicitud(solicitud_id, db)
 
-    if solicitud.estado != EstadoSolicitud.EN_REVISION:
+    estados_permitidos = [EstadoSolicitud.EN_REVISION, EstadoSolicitud.REVISION_COORDINADOR]
+    if solicitud.estado not in estados_permitidos:
         raise HTTPException(
             status_code=400,
-            detail="El pensum destino solo se puede subir cuando la solicitud está EN_REVISION"
+            detail="El pensum destino solo se puede subir cuando la solicitud está EN_REVISION o REVISION_COORDINADOR",
         )
 
-    return await _upsert_documento(db, solicitud_id, TipoDocumento.PENSUM_DESTINO, file)
+    doc = await _upsert_documento(db, solicitud_id, TipoDocumento.PENSUM_DESTINO, file)
+    return _documento_a_response(doc)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -220,9 +229,10 @@ async def subir_pensum_destino(
 
 @router.get(
     "/{solicitud_id}",
+    response_model=list[DocumentoResponse],
     summary="Listar documentos de una solicitud",
     description=(
-        "Retorna los documentos subidos para una solicitud. "
+        "Retorna los documentos subidos para una solicitud con sus URLs públicas. "
         "El estudiante solo ve los de sus propias solicitudes."
     ),
     responses={
@@ -241,7 +251,9 @@ async def listar_documentos(
     result = await db.execute(
         select(Documento).where(Documento.solicitud_id == solicitud_id)
     )
-    return result.scalars().all()
+    documentos = result.scalars().all()
+    
+    return [_documento_a_response(doc) for doc in documentos]
 
 
 @router.get(

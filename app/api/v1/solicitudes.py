@@ -1,109 +1,139 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
-from sqlalchemy.orm import selectinload
 from uuid import UUID
 from typing import Optional
-from datetime import date
+from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
 from app.core.deps import get_current_user, require_rol
 from app.models.usuario import Usuario, Rol
 from app.models.solicitud import Solicitud, EstadoSolicitud, HistorialEstado
-from app.models.documento import Documento, TipoDocumento
 from app.models.academico import Programa, Institucion
-from app.schemas.solicitud import SolicitudCreate, SolicitudResponse, CambiarEstadoRequest
-from app.schemas.paginacion import PaginatedResponse
+from app.schemas.solicitud import SolicitudCreate, SolicitudResponse, CambiarEstadoRequest, HistorialEstadoResponse
 from app.services.kafka_service import publicar_cambio_estado
+from app.schemas.paginacion import PaginatedResponse
+from pydantic import BaseModel, Field
+from datetime import datetime
+from typing import Optional as OptionalType
 
 router = APIRouter(prefix="/solicitudes", tags=["Solicitudes"])
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Helpers
+# Schemas adicionales para catálogos
 # ──────────────────────────────────────────────────────────────────────────────
 
-async def _poblar_desde_catalogo(
-    db: AsyncSession, programa_id, texto_nombre, texto_institucion
+class InstitucionOpcionResponse(BaseModel):
+    """Opción de institución para seleccionar al crear solicitud"""
+    id: UUID
+    nombre: str
+    tipo: OptionalType[str] = None
+    codigo_ies: OptionalType[str] = None
+
+    model_config = {"from_attributes": True}
+
+
+class ProgramaOpcionResponse(BaseModel):
+    """Opción de programa para seleccionar al crear solicitud"""
+    id: UUID
+    nombre: str
+    institucion_id: UUID
+    institucion_nombre: OptionalType[str] = None
+    codigo_snies: OptionalType[str] = None
+    tipo_formacion: OptionalType[str] = None
+    metodologia: OptionalType[str] = None
+
+    model_config = {"from_attributes": True}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Helpers internos
+# ──────────────────────────────────────────────────────────────────────────────
+
+async def _obtener_solicitud(solicitud_id: UUID, db: AsyncSession) -> Solicitud:
+    result = await db.execute(
+        select(Solicitud)
+        .where(Solicitud.id == solicitud_id)
+        .options(
+            selectinload(Solicitud.estudiante),
+            selectinload(Solicitud.programa_origen_rel),
+            selectinload(Solicitud.programa_destino_rel),
+        )
+    )
+    solicitud = result.scalar_one_or_none()
+    if not solicitud:
+        raise HTTPException(status_code=404, detail="Solicitud no encontrada")
+    return solicitud
+
+
+async def _verificar_scope_estudiante(
+    solicitud: Solicitud, usuario: Usuario
+) -> None:
+    """Estudiante solo puede ver/editar sus propias solicitudes"""
+    if usuario.rol == Rol.ESTUDIANTE and solicitud.estudiante_id != usuario.id:
+        raise HTTPException(status_code=403, detail="Sin permisos sobre esta solicitud")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Endpoints — Catálogos (opciones para crear solicitud)
+# ──────────────────────────────────────────────────────────────────────────────
+
+@router.get(
+    "/opciones/instituciones",
+    response_model=list[InstitucionOpcionResponse],
+    summary="Listar instituciones",
+    description="Retorna las instituciones disponibles para elegir al crear una solicitud.",
+)
+async def listar_instituciones(
+    db: AsyncSession = Depends(get_db),
+    _: Usuario = Depends(get_current_user),
 ):
-    if not programa_id:
-        return texto_nombre, texto_institucion
+    """Lista todas las instituciones disponibles"""
     result = await db.execute(
-        select(Programa)
-        .where(Programa.id == programa_id)
-        .options(selectinload(Programa.institucion))
+        select(Institucion).order_by(Institucion.nombre)
     )
-    prog = result.scalar_one_or_none()
-    if prog:
-        return prog.nombre, (prog.institucion.nombre if prog.institucion else texto_institucion)
-    return texto_nombre, texto_institucion
+    return result.scalars().all()
 
 
-async def _buscar_programa_por_nombre(
-    db: AsyncSession,
-    nombre: Optional[str],
-    nombre_institucion: Optional[str],
-) -> Optional[UUID]:
-    """
-    Busca un programa por nombre (ilike) y opcionalmente filtra por institución.
-    Retorna el ID del primer match o None.
-    """
-    if not nombre:
-        return None
-
-    stmt = select(Programa).where(Programa.nombre.ilike(nombre))
-
-    if nombre_institucion:
-        stmt = stmt.join(Programa.institucion).where(
-            Institucion.nombre.ilike(nombre_institucion)
-        )
-
-    result = await db.execute(stmt.limit(1))
-    prog = result.scalars().first()
-    return prog.id if prog else None
-
-
-async def _verificar_notas_subidas(db: AsyncSession, solicitud_id: UUID) -> None:
-    """
-    Verifica que el estudiante haya subido su certificado de notas (pensum_origen).
-    El pensum_destino lo sube el coordinador después — no se valida aquí.
-    """
-    result = await db.execute(
-        select(Documento.tipo).where(Documento.solicitud_id == solicitud_id)
-    )
-    tipos = {row[0] for row in result.fetchall()}
-
-    if TipoDocumento.PENSUM_ORIGEN not in tipos:
-        raise HTTPException(
-            status_code=400,
-            detail="Debes subir tu certificado de notas antes de enviar la solicitud. "
-                   "Usa el endpoint POST /documentos/{id}/notas",
-        )
-
-
-async def _verificar_ambos_pdfs(db: AsyncSession, solicitud_id: UUID) -> None:
-    """
-    Verifica que existan AMBOS PDFs antes de activar la IA.
-    Llamado desde homologaciones.py al procesar.
-    """
-    result = await db.execute(
-        select(Documento.tipo).where(Documento.solicitud_id == solicitud_id)
-    )
-    tipos = {row[0] for row in result.fetchall()}
-    faltantes = []
-    if TipoDocumento.PENSUM_ORIGEN not in tipos:
-        faltantes.append("certificado de notas del estudiante")
-    if TipoDocumento.PENSUM_DESTINO not in tipos:
-        faltantes.append("pensum del programa destino")
-    if faltantes:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Faltan documentos para procesar con IA: {', '.join(faltantes)}",
-        )
+@router.get(
+    "/opciones/programas",
+    response_model=list[ProgramaOpcionResponse],
+    summary="Listar programas",
+    description=(
+        "Retorna los programas disponibles. "
+        "Filtrar por institucion_id para obtener solo los de una institución."
+    ),
+)
+async def listar_programas(
+    institucion_id: OptionalType[UUID] = Query(None, description="Filtrar por institución"),
+    db: AsyncSession = Depends(get_db),
+    _: Usuario = Depends(get_current_user),
+):
+    """Lista programas con opción de filtrar por institución"""
+    query = select(Programa).options(
+        selectinload(Programa.institucion)
+    ).order_by(Programa.nombre)
+    
+    if institucion_id:
+        query = query.where(Programa.institucion_id == institucion_id)
+    
+    result = await db.execute(query)
+    programas = result.scalars().all()
+    
+    # Enriquecer respuesta con nombre de institución
+    response = []
+    for prog in programas:
+        data = ProgramaOpcionResponse.model_validate(prog)
+        if prog.institucion:
+            data.institucion_nombre = prog.institucion.nombre
+        response.append(data)
+    
+    return response
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Endpoints
+# Endpoints — CRUD de Solicitudes
 # ──────────────────────────────────────────────────────────────────────────────
 
 @router.post(
@@ -111,50 +141,103 @@ async def _verificar_ambos_pdfs(db: AsyncSession, solicitud_id: UUID) -> None:
     response_model=SolicitudResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Crear solicitud",
-    description="El estudiante crea una nueva solicitud de homologación.",
+    description=(
+        "El estudiante crea una solicitud. Puede elegir institución y programa del catálogo "
+        "O escribir texto libre si selecciona 'Otra'. La solicitud inicia en estado BORRADOR."
+    ),
+    responses={
+        201: {"description": "Solicitud creada"},
+        400: {"description": "Datos inválidos o programa no encontrado"},
+        403: {"description": "Solo estudiantes pueden crear solicitudes"},
+    },
 )
 async def crear_solicitud(
     data: SolicitudCreate,
     db: AsyncSession = Depends(get_db),
     usuario: Usuario = Depends(require_rol(Rol.ESTUDIANTE)),
 ):
-    programa_origen_id = data.programa_origen_id
-    programa_destino_id = data.programa_destino_id
+    """Crear nueva solicitud"""
+    
+    # Inicializar valores de institución y programa
+    institucion_origen = None
+    programa_origen = None
+    programa_origen_id = None
+    institucion_destino = None
+    programa_destino = None
+    programa_destino_id = None
 
-    # Buscar por nombre + institución si no se proporcionó ID
-    if not programa_origen_id:
-        programa_origen_id = await _buscar_programa_por_nombre(
-            db, data.programa_origen, data.institucion_origen
+    # ── ORIGEN ────────────────────────────────────────────────────────
+    if data.programa_origen_id:
+        # Elegido del catálogo
+        result = await db.execute(
+            select(Programa)
+            .where(Programa.id == data.programa_origen_id)
+            .options(selectinload(Programa.institucion))
+        )
+        prog = result.scalar_one_or_none()
+        if not prog:
+            raise HTTPException(status_code=400, detail="Programa origen no encontrado")
+        
+        institucion_origen = prog.institucion.nombre if prog.institucion else None
+        programa_origen = prog.nombre
+        programa_origen_id = prog.id
+    
+    elif data.institucion_origen_texto and data.programa_origen_texto:
+        # Texto libre (opción "Otra")
+        institucion_origen = data.institucion_origen_texto
+        programa_origen = data.programa_origen_texto
+    
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Debes elegir un programa del catálogo o escribir 'Otra'"
         )
 
-    if not programa_destino_id:
-        programa_destino_id = await _buscar_programa_por_nombre(
-            db, data.programa_destino, data.institucion_destino
+    # ── DESTINO ───────────────────────────────────────────────────────
+    if data.programa_destino_id:
+        # Elegido del catálogo
+        result = await db.execute(
+            select(Programa)
+            .where(Programa.id == data.programa_destino_id)
+            .options(selectinload(Programa.institucion))
+        )
+        prog = result.scalar_one_or_none()
+        if not prog:
+            raise HTTPException(status_code=400, detail="Programa destino no encontrado")
+        
+        institucion_destino = prog.institucion.nombre if prog.institucion else None
+        programa_destino = prog.nombre
+        programa_destino_id = prog.id
+    
+    elif data.institucion_destino_texto and data.programa_destino_texto:
+        # Texto libre (opción "Otra")
+        institucion_destino = data.institucion_destino_texto
+        programa_destino = data.programa_destino_texto
+    
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Debes elegir un programa destino del catálogo o escribir 'Otra'"
         )
 
-    programa_origen, institucion_origen = await _poblar_desde_catalogo(
-        db, programa_origen_id, data.programa_origen, data.institucion_origen
-    )
-    programa_destino, institucion_destino = await _poblar_desde_catalogo(
-        db, programa_destino_id, data.programa_destino, data.institucion_destino
-    )
-
+    # Crear solicitud
     solicitud = Solicitud(
         estudiante_id=usuario.id,
         cedula=data.cedula,
         telefono=data.telefono,
         correo_contacto=data.correo_contacto,
-        programa_origen_id=programa_origen_id,
-        programa_destino_id=programa_destino_id,
         institucion_origen=institucion_origen,
         programa_origen=programa_origen,
+        programa_origen_id=programa_origen_id,
         institucion_destino=institucion_destino,
         programa_destino=programa_destino,
+        programa_destino_id=programa_destino_id,
         estado=EstadoSolicitud.BORRADOR,
     )
     db.add(solicitud)
     await db.commit()
     await db.refresh(solicitud)
+    
     return solicitud
 
 
@@ -163,45 +246,48 @@ async def crear_solicitud(
     response_model=PaginatedResponse[SolicitudResponse],
     summary="Listar solicitudes",
     description=(
-        "Estudiantes ven solo las suyas. Coordinadores y rectores ven todas. "
-        "Filtros: estado, programa destino, fecha. Paginación incluida."
+        "Estudiantes ven solo sus solicitudes. "
+        "Coordinadores y rectores ven todas con filtros opcionales."
     ),
 )
 async def listar_solicitudes(
-    estado: Optional[EstadoSolicitud] = Query(None),
-    programa_destino_id: Optional[UUID] = Query(None),
-    fecha_desde: Optional[date] = Query(None),
-    fecha_hasta: Optional[date] = Query(None),
-    page: int = Query(1, ge=1),
-    size: int = Query(20, ge=1, le=100),
+    estado: OptionalType[EstadoSolicitud] = Query(None, description="Filtrar por estado"),
+    estudiante_id: OptionalType[UUID] = Query(None, description="Filtrar por estudiante (solo rector/coordinador)"),
+    page: int = Query(1, ge=1, description="Número de página"),
+    size: int = Query(20, ge=1, le=100, description="Resultados por página"),
     db: AsyncSession = Depends(get_db),
     usuario: Usuario = Depends(get_current_user),
 ):
+    """Lista solicitudes según rol del usuario"""
+    
     query = select(Solicitud)
     count_query = select(func.count(Solicitud.id))
 
+    # Filtros según rol
     if usuario.rol == Rol.ESTUDIANTE:
+        # El estudiante solo ve sus propias solicitudes
         query = query.where(Solicitud.estudiante_id == usuario.id)
         count_query = count_query.where(Solicitud.estudiante_id == usuario.id)
+    else:
+        # Coordinador y Rector pueden filtrar por estudiante
+        if estudiante_id:
+            query = query.where(Solicitud.estudiante_id == estudiante_id)
+            count_query = count_query.where(Solicitud.estudiante_id == estudiante_id)
 
-    if estado is not None:
+    # Filtro por estado (aplica a todos)
+    if estado:
         query = query.where(Solicitud.estado == estado)
         count_query = count_query.where(Solicitud.estado == estado)
-    if programa_destino_id is not None:
-        query = query.where(Solicitud.programa_destino_id == programa_destino_id)
-        count_query = count_query.where(Solicitud.programa_destino_id == programa_destino_id)
-    if fecha_desde is not None:
-        query = query.where(Solicitud.creado_en >= fecha_desde)
-        count_query = count_query.where(Solicitud.creado_en >= fecha_desde)
-    if fecha_hasta is not None:
-        query = query.where(Solicitud.creado_en <= fecha_hasta)
-        count_query = count_query.where(Solicitud.creado_en <= fecha_hasta)
 
-    total = (await db.execute(count_query)).scalar_one()
+    # Contar total
+    total_result = await db.execute(count_query)
+    total = total_result.scalar_one()
+
+    # Paginar y ordenar
     offset = (page - 1) * size
-    items = (await db.execute(
-        query.order_by(Solicitud.creado_en.desc()).offset(offset).limit(size)
-    )).scalars().all()
+    query = query.order_by(Solicitud.creado_en.desc()).offset(offset).limit(size)
+    result = await db.execute(query)
+    items = result.scalars().all()
 
     return PaginatedResponse(total=total, page=page, size=size, items=items)
 
@@ -210,70 +296,129 @@ async def listar_solicitudes(
     "/{solicitud_id}",
     response_model=SolicitudResponse,
     summary="Obtener solicitud",
+    description="Retorna el detalle de una solicitud. Estudiante solo puede ver las suyas.",
 )
 async def obtener_solicitud(
     solicitud_id: UUID,
     db: AsyncSession = Depends(get_db),
     usuario: Usuario = Depends(get_current_user),
 ):
-    result = await db.execute(select(Solicitud).where(Solicitud.id == solicitud_id))
-    solicitud = result.scalar_one_or_none()
-    if not solicitud:
-        raise HTTPException(status_code=404, detail="Solicitud no encontrada")
-    if usuario.rol == Rol.ESTUDIANTE and solicitud.estudiante_id != usuario.id:
-        raise HTTPException(status_code=403, detail="Sin permisos")
+    """Obtener una solicitud específica"""
+    solicitud = await _obtener_solicitud(solicitud_id, db)
+    await _verificar_scope_estudiante(solicitud, usuario)
+    
     return solicitud
 
 
-@router.get(
-    "/{solicitud_id}/historial",
-    summary="Historial de estados",
-)
-async def historial_solicitud(
-    solicitud_id: UUID,
-    db: AsyncSession = Depends(get_db),
-    usuario: Usuario = Depends(get_current_user),
-):
-    result = await db.execute(select(Solicitud).where(Solicitud.id == solicitud_id))
-    solicitud = result.scalar_one_or_none()
-    if not solicitud:
-        raise HTTPException(status_code=404, detail="Solicitud no encontrada")
-    if usuario.rol == Rol.ESTUDIANTE and solicitud.estudiante_id != usuario.id:
-        raise HTTPException(status_code=403, detail="Sin permisos")
-
-    result_h = await db.execute(
-        select(HistorialEstado)
-        .where(HistorialEstado.solicitud_id == solicitud_id)
-        .order_by(HistorialEstado.creado_en.asc())
-    )
-    return result_h.scalars().all()
-
-
 @router.patch(
+    "/{solicitud_id}",
+    response_model=SolicitudResponse,
+    summary="Actualizar solicitud",
+    description=(
+        "El estudiante puede actualizar su solicitud si está en estado BORRADOR. "
+        "Puede cambiar institucion/programa eligiendo del catálogo o escribiendo texto libre."
+    ),
+    responses={
+        400: {"description": "Solicitud no está en BORRADOR o datos inválidos"},
+        403: {"description": "Sin permisos o no es propietario"},
+        404: {"description": "Solicitud no encontrada"},
+    },
+)
+async def actualizar_solicitud(
+    solicitud_id: UUID,
+    data: SolicitudCreate,
+    db: AsyncSession = Depends(get_db),
+    usuario: Usuario = Depends(require_rol(Rol.ESTUDIANTE)),
+):
+    """Actualizar solicitud (solo en estado BORRADOR)"""
+    solicitud = await _obtener_solicitud(solicitud_id, db)
+    await _verificar_scope_estudiante(solicitud, usuario)
+
+    if solicitud.estado != EstadoSolicitud.BORRADOR:
+        raise HTTPException(
+            status_code=400,
+            detail="Solo se pueden editar solicitudes en estado BORRADOR"
+        )
+
+    # Actualizar datos personales
+    if data.cedula is not None:
+        solicitud.cedula = data.cedula
+    if data.telefono is not None:
+        solicitud.telefono = data.telefono
+    if data.correo_contacto is not None:
+        solicitud.correo_contacto = data.correo_contacto
+
+    # ── ORIGEN ────────────────────────────────────────────────────────
+    if data.programa_origen_id:
+        result = await db.execute(
+            select(Programa)
+            .where(Programa.id == data.programa_origen_id)
+            .options(selectinload(Programa.institucion))
+        )
+        prog = result.scalar_one_or_none()
+        if not prog:
+            raise HTTPException(status_code=400, detail="Programa origen no encontrado")
+        
+        solicitud.institucion_origen = prog.institucion.nombre if prog.institucion else None
+        solicitud.programa_origen = prog.nombre
+        solicitud.programa_origen_id = prog.id
+    
+    elif data.institucion_origen_texto and data.programa_origen_texto:
+        solicitud.institucion_origen = data.institucion_origen_texto
+        solicitud.programa_origen = data.programa_origen_texto
+        solicitud.programa_origen_id = None
+
+    # ── DESTINO ───────────────────────────────────────────────────────
+    if data.programa_destino_id:
+        result = await db.execute(
+            select(Programa)
+            .where(Programa.id == data.programa_destino_id)
+            .options(selectinload(Programa.institucion))
+        )
+        prog = result.scalar_one_or_none()
+        if not prog:
+            raise HTTPException(status_code=400, detail="Programa destino no encontrado")
+        
+        solicitud.institucion_destino = prog.institucion.nombre if prog.institucion else None
+        solicitud.programa_destino = prog.nombre
+        solicitud.programa_destino_id = prog.id
+    
+    elif data.institucion_destino_texto and data.programa_destino_texto:
+        solicitud.institucion_destino = data.institucion_destino_texto
+        solicitud.programa_destino = data.programa_destino_texto
+        solicitud.programa_destino_id = None
+
+    await db.commit()
+    await db.refresh(solicitud)
+    
+    return solicitud
+
+
+@router.post(
     "/{solicitud_id}/enviar",
     response_model=SolicitudResponse,
     summary="Enviar solicitud",
-    description=(
-        "El estudiante envía la solicitud para revisión. "
-        "**Requiere que el certificado de notas esté subido.** "
-        "El coordinador subirá el pensum destino después."
-    ),
+    description="El estudiante envía su solicitud de BORRADOR a ENVIADA.",
+    responses={
+        400: {"description": "Solicitud no está en BORRADOR"},
+        403: {"description": "No es propietario"},
+        404: {"description": "Solicitud no encontrada"},
+    },
 )
 async def enviar_solicitud(
     solicitud_id: UUID,
     db: AsyncSession = Depends(get_db),
     usuario: Usuario = Depends(require_rol(Rol.ESTUDIANTE)),
 ):
-    result = await db.execute(select(Solicitud).where(Solicitud.id == solicitud_id))
-    solicitud = result.scalar_one_or_none()
-    if not solicitud:
-        raise HTTPException(status_code=404, detail="Solicitud no encontrada")
-    if solicitud.estudiante_id != usuario.id:
-        raise HTTPException(status_code=403, detail="Sin permisos")
-    if solicitud.estado != EstadoSolicitud.BORRADOR:
-        raise HTTPException(status_code=400, detail="Solo se pueden enviar solicitudes en BORRADOR")
+    """Enviar solicitud de BORRADOR a ENVIADA"""
+    solicitud = await _obtener_solicitud(solicitud_id, db)
+    await _verificar_scope_estudiante(solicitud, usuario)
 
-    await _verificar_notas_subidas(db, solicitud_id)
+    if solicitud.estado != EstadoSolicitud.BORRADOR:
+        raise HTTPException(
+            status_code=400,
+            detail="Solo se pueden enviar solicitudes en estado BORRADOR"
+        )
 
     historial = HistorialEstado(
         solicitud_id=solicitud.id,
@@ -285,138 +430,269 @@ async def enviar_solicitud(
     db.add(historial)
     await db.commit()
     await db.refresh(solicitud)
+
+    estudiante = solicitud.estudiante
     publicar_cambio_estado(
         solicitud_id=str(solicitud.id),
         estado_anterior=EstadoSolicitud.BORRADOR.value,
         estado_nuevo=EstadoSolicitud.ENVIADA.value,
         usuario_id=str(usuario.id),
-        email_estudiante=getattr(solicitud, "correo_contacto", "") or "",
-        nombre_estudiante=f"{usuario.nombre} {usuario.apellido}",
+        email_estudiante=estudiante.email,
+        nombre_estudiante=f"{estudiante.nombre} {estudiante.apellido}",
     )
+
     return solicitud
 
 
 @router.patch(
-    "/{solicitud_id}/revisar",
+    "/{solicitud_id}/cambiar-estado",
     response_model=SolicitudResponse,
-    summary="Tomar en revisión",
-    description=(
-        "El coordinador toma la solicitud. "
-        "Después de esto debe subir el pensum destino antes de activar la IA."
-    ),
+    summary="Cambiar estado (Coordinador/Rector)",
+    description="Coordinadores y rectores cambian el estado de una solicitud.",
+    responses={
+        400: {"description": "Transición de estado inválida"},
+        403: {"description": "Solo coordinadores y rectores pueden cambiar estado"},
+        404: {"description": "Solicitud no encontrada"},
+    },
 )
-async def tomar_revision(
+async def cambiar_estado(
     solicitud_id: UUID,
-    data: CambiarEstadoRequest,
+    nuevo_estado: EstadoSolicitud = Query(..., description="Nuevo estado"),
+    data: CambiarEstadoRequest = None,
     db: AsyncSession = Depends(get_db),
-    usuario: Usuario = Depends(require_rol(Rol.COORDINADOR)),
+    usuario: Usuario = Depends(require_rol(Rol.COORDINADOR, Rol.RECTOR)),
 ):
-    result = await db.execute(select(Solicitud).where(Solicitud.id == solicitud_id))
-    solicitud = result.scalar_one_or_none()
-    if not solicitud:
-        raise HTTPException(status_code=404, detail="Solicitud no encontrada")
-    if solicitud.estado != EstadoSolicitud.ENVIADA:
-        raise HTTPException(status_code=400, detail="La solicitud debe estar en estado ENVIADA")
+    """Cambiar el estado de una solicitud"""
+    solicitud = await _obtener_solicitud(solicitud_id, db)
+
+    if solicitud.estado == nuevo_estado:
+        raise HTTPException(
+            status_code=400,
+            detail="La solicitud ya está en ese estado"
+        )
 
     historial = HistorialEstado(
         solicitud_id=solicitud.id,
         usuario_id=usuario.id,
         estado_anterior=solicitud.estado,
-        estado_nuevo=EstadoSolicitud.EN_REVISION,
-        observacion=data.observacion,
+        estado_nuevo=nuevo_estado,
+        observacion=data.observacion if data else None,
     )
-    solicitud.estado = EstadoSolicitud.EN_REVISION
+    solicitud.estado = nuevo_estado
+    if data and data.observacion:
+        solicitud.observaciones = data.observacion
+
     db.add(historial)
     await db.commit()
     await db.refresh(solicitud)
+
+    estudiante = solicitud.estudiante
     publicar_cambio_estado(
         solicitud_id=str(solicitud.id),
-        estado_anterior=EstadoSolicitud.ENVIADA.value,
-        estado_nuevo=EstadoSolicitud.EN_REVISION.value,
+        estado_anterior=historial.estado_anterior.value,
+        estado_nuevo=nuevo_estado.value,
         usuario_id=str(usuario.id),
-        email_estudiante=getattr(solicitud, "correo_contacto", "") or "",
-        nombre_estudiante="",
+        email_estudiante=estudiante.email,
+        nombre_estudiante=f"{estudiante.nombre} {estudiante.apellido}",
+        observacion=data.observacion if data else None,
     )
+
     return solicitud
 
 
-@router.patch(
+@router.delete(
+    "/{solicitud_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Eliminar solicitud",
+    description="El estudiante puede eliminar su solicitud si está en BORRADOR.",
+    responses={
+        400: {"description": "Solicitud no está en BORRADOR"},
+        403: {"description": "No es propietario"},
+        404: {"description": "Solicitud no encontrada"},
+    },
+)
+async def eliminar_solicitud(
+    solicitud_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    usuario: Usuario = Depends(require_rol(Rol.ESTUDIANTE)),
+):
+    """Eliminar solicitud en BORRADOR"""
+    solicitud = await _obtener_solicitud(solicitud_id, db)
+    await _verificar_scope_estudiante(solicitud, usuario)
+
+    if solicitud.estado != EstadoSolicitud.BORRADOR:
+        raise HTTPException(
+            status_code=400,
+            detail="Solo se pueden eliminar solicitudes en estado BORRADOR"
+        )
+
+    await db.delete(solicitud)
+    await db.commit()
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Endpoints — Aprobación/Rechazo (Rector)
+# ──────────────────────────────────────────────────────────────────────────────
+
+@router.post(
     "/{solicitud_id}/aprobar",
     response_model=SolicitudResponse,
-    summary="Aprobar homologación",
+    summary="Aprobar solicitud",
+    description=(
+        "El rector aprueba la solicitud de homologación. "
+        "La solicitud debe estar en estado PENDIENTE_RECTOR."
+    ),
+    responses={
+        200: {"description": "Solicitud aprobada"},
+        400: {"description": "La solicitud no está en estado PENDIENTE_RECTOR"},
+        403: {"description": "Solo el rector puede aprobar solicitudes"},
+        404: {"description": "Solicitud no encontrada"},
+    },
 )
 async def aprobar_solicitud(
     solicitud_id: UUID,
-    data: CambiarEstadoRequest,
+    data: CambiarEstadoRequest = None,
     db: AsyncSession = Depends(get_db),
     usuario: Usuario = Depends(require_rol(Rol.RECTOR)),
 ):
-    result = await db.execute(select(Solicitud).where(Solicitud.id == solicitud_id))
-    solicitud = result.scalar_one_or_none()
-    if not solicitud:
-        raise HTTPException(status_code=404, detail="Solicitud no encontrada")
+    solicitud = await _obtener_solicitud(solicitud_id, db)
+
     if solicitud.estado != EstadoSolicitud.PENDIENTE_RECTOR:
-        raise HTTPException(status_code=400, detail="La solicitud debe estar en PENDIENTE_RECTOR")
+        raise HTTPException(
+            status_code=400,
+            detail="La solicitud debe estar en estado PENDIENTE_RECTOR para ser aprobada",
+        )
 
     historial = HistorialEstado(
         solicitud_id=solicitud.id,
         usuario_id=usuario.id,
         estado_anterior=solicitud.estado,
         estado_nuevo=EstadoSolicitud.APROBADA,
-        observacion=data.observacion,
+        observacion=data.observacion if data else None,
     )
     solicitud.estado = EstadoSolicitud.APROBADA
+    if data and data.observacion:
+        solicitud.observaciones = data.observacion
+
     db.add(historial)
     await db.commit()
     await db.refresh(solicitud)
+
+    estudiante = solicitud.estudiante
     publicar_cambio_estado(
         solicitud_id=str(solicitud.id),
         estado_anterior=EstadoSolicitud.PENDIENTE_RECTOR.value,
         estado_nuevo=EstadoSolicitud.APROBADA.value,
         usuario_id=str(usuario.id),
-        email_estudiante=getattr(solicitud, "correo_contacto", "") or "",
-        nombre_estudiante="",
-        observacion=data.observacion,
+        email_estudiante=estudiante.email,
+        nombre_estudiante=f"{estudiante.nombre} {estudiante.apellido}",
+        observacion=data.observacion if data else None,
     )
+
     return solicitud
 
 
-@router.patch(
+@router.post(
     "/{solicitud_id}/rechazar",
     response_model=SolicitudResponse,
-    summary="Rechazar homologación",
+    summary="Rechazar solicitud",
+    description=(
+        "El rector rechaza la solicitud de homologación. "
+        "La solicitud debe estar en estado PENDIENTE_RECTOR."
+    ),
+    responses={
+        200: {"description": "Solicitud rechazada"},
+        400: {"description": "La solicitud no está en estado PENDIENTE_RECTOR"},
+        403: {"description": "Solo el rector puede rechazar solicitudes"},
+        404: {"description": "Solicitud no encontrada"},
+    },
 )
 async def rechazar_solicitud(
     solicitud_id: UUID,
-    data: CambiarEstadoRequest,
+    data: CambiarEstadoRequest = None,
     db: AsyncSession = Depends(get_db),
     usuario: Usuario = Depends(require_rol(Rol.RECTOR)),
 ):
-    result = await db.execute(select(Solicitud).where(Solicitud.id == solicitud_id))
-    solicitud = result.scalar_one_or_none()
-    if not solicitud:
-        raise HTTPException(status_code=404, detail="Solicitud no encontrada")
+    solicitud = await _obtener_solicitud(solicitud_id, db)
+
     if solicitud.estado != EstadoSolicitud.PENDIENTE_RECTOR:
-        raise HTTPException(status_code=400, detail="La solicitud debe estar en PENDIENTE_RECTOR")
+        raise HTTPException(
+            status_code=400,
+            detail="La solicitud debe estar en estado PENDIENTE_RECTOR para ser rechazada",
+        )
 
     historial = HistorialEstado(
         solicitud_id=solicitud.id,
         usuario_id=usuario.id,
         estado_anterior=solicitud.estado,
         estado_nuevo=EstadoSolicitud.RECHAZADA,
-        observacion=data.observacion,
+        observacion=data.observacion if data else None,
     )
     solicitud.estado = EstadoSolicitud.RECHAZADA
+    if data and data.observacion:
+        solicitud.observaciones = data.observacion
+
     db.add(historial)
     await db.commit()
     await db.refresh(solicitud)
+
+    estudiante = solicitud.estudiante
     publicar_cambio_estado(
         solicitud_id=str(solicitud.id),
         estado_anterior=EstadoSolicitud.PENDIENTE_RECTOR.value,
         estado_nuevo=EstadoSolicitud.RECHAZADA.value,
         usuario_id=str(usuario.id),
-        email_estudiante=getattr(solicitud, "correo_contacto", "") or "",
-        nombre_estudiante="",
-        observacion=data.observacion,
+        email_estudiante=estudiante.email,
+        nombre_estudiante=f"{estudiante.nombre} {estudiante.apellido}",
+        observacion=data.observacion if data else None,
     )
+
     return solicitud
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Endpoints — Historial
+# ──────────────────────────────────────────────────────────────────────────────
+
+@router.get(
+    "/{solicitud_id}/historial",
+    response_model=list[HistorialEstadoResponse],
+    summary="Ver historial de estados",
+    description=(
+        "Retorna el historial de cambios de estado de una solicitud en orden cronológico. "
+        "Incluye quién realizó cada cambio y la observación asociada. "
+        "El estudiante solo puede ver el historial de sus propias solicitudes."
+    ),
+    responses={
+        403: {"description": "Sin permisos sobre esta solicitud"},
+        404: {"description": "Solicitud no encontrada"},
+    },
+)
+async def obtener_historial(
+    solicitud_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    solicitud = await _obtener_solicitud(solicitud_id, db)
+    await _verificar_scope_estudiante(solicitud, usuario)
+
+    result = await db.execute(
+        select(HistorialEstado)
+        .where(HistorialEstado.solicitud_id == solicitud_id)
+        .options(selectinload(HistorialEstado.usuario))
+        .order_by(HistorialEstado.creado_en.asc())
+    )
+    entradas = result.scalars().all()
+
+    return [
+        HistorialEstadoResponse(
+            id=h.id,
+            estado_anterior=h.estado_anterior,
+            estado_nuevo=h.estado_nuevo,
+            observacion=h.observacion,
+            creado_en=h.creado_en,
+            usuario_id=h.usuario_id,
+            usuario_nombre=f"{h.usuario.nombre} {h.usuario.apellido}" if h.usuario else None,
+        )
+        for h in entradas
+    ]

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from uuid import UUID
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import selectinload
@@ -11,7 +11,11 @@ from app.models.usuario import Usuario, Rol
 from app.models.solicitud import Solicitud, EstadoSolicitud, HistorialEstado
 from app.models.documento import Documento, TipoDocumento
 from app.models.homologacion import Homologacion, HomologacionAsignatura, EstadoAsignatura
-from app.schemas.homologacion import HomologacionResponse
+from app.schemas.homologacion import (
+    HomologacionResponse,
+    HomologacionAsignaturaResponse,
+    ActualizarAsignaturaRequest,
+)
 from app.services.ai_service import procesar_homologacion
 from app.services.doc_service import generar_resolucion_docx
 from app.services.kafka_service import publicar_homologacion_completada
@@ -27,7 +31,8 @@ router = APIRouter(prefix="/homologaciones", tags=["Homologaciones"])
         "El coordinador activa el procesamiento con IA. "
         "Requiere que el estudiante haya subido sus notas "
         "y que el coordinador haya subido el pensum destino. "
-        "La solicitud debe estar en estado EN_REVISION."
+        "La solicitud debe estar en estado EN_REVISION o REVISION_COORDINADOR. "
+        "Si ya existe una homologación previa (reprocesamiento), se elimina antes de crear la nueva."
     ),
     responses={
         200: {"description": "Homologación procesada exitosamente"},
@@ -42,7 +47,6 @@ async def procesar(
     db: AsyncSession = Depends(get_db),
     usuario: Usuario = Depends(require_rol(Rol.COORDINADOR)),
 ):
-    # Verificar solicitud
     result = await db.execute(
         select(Solicitud)
         .where(Solicitud.id == solicitud_id)
@@ -53,13 +57,13 @@ async def procesar(
     if not solicitud:
         raise HTTPException(status_code=404, detail="Solicitud no encontrada")
 
-    if solicitud.estado != EstadoSolicitud.EN_REVISION:
+    estados_permitidos = [EstadoSolicitud.EN_REVISION, EstadoSolicitud.REVISION_COORDINADOR]
+    if solicitud.estado not in estados_permitidos:
         raise HTTPException(
             status_code=400,
-            detail="La solicitud debe estar en estado EN_REVISION para procesar con IA"
+            detail="La solicitud debe estar en estado EN_REVISION o REVISION_COORDINADOR para procesar con IA",
         )
 
-    # Verificar que existan ambos documentos
     result_docs = await db.execute(
         select(Documento).where(Documento.solicitud_id == solicitud_id)
     )
@@ -70,17 +74,31 @@ async def procesar(
         raise HTTPException(
             status_code=400,
             detail="Falta el certificado de notas del estudiante. "
-                   "El estudiante debe subirlo en POST /documentos/{id}/notas"
+                   "El estudiante debe subirlo en POST /documentos/{id}/notas",
         )
 
     if TipoDocumento.PENSUM_DESTINO not in tipos:
         raise HTTPException(
             status_code=400,
             detail="Falta el pensum del programa destino. "
-                   "El coordinador debe subirlo en POST /documentos/{id}/pensum-destino"
+                   "El coordinador debe subirlo en POST /documentos/{id}/pensum-destino",
         )
 
-    # Cambiar estado a procesando
+    # Si es un reprocesamiento, eliminar la homologación previa y sus asignaturas
+    if solicitud.estado == EstadoSolicitud.REVISION_COORDINADOR:
+        result_hom = await db.execute(
+            select(Homologacion).where(Homologacion.solicitud_id == solicitud_id)
+        )
+        hom_existente = result_hom.scalar_one_or_none()
+        if hom_existente:
+            await db.execute(
+                delete(HomologacionAsignatura).where(
+                    HomologacionAsignatura.homologacion_id == hom_existente.id
+                )
+            )
+            await db.delete(hom_existente)
+            await db.flush()
+
     historial = HistorialEstado(
         solicitud_id=solicitud.id,
         usuario_id=usuario.id,
@@ -91,19 +109,16 @@ async def procesar(
     db.add(historial)
     await db.commit()
 
-    # Llamar a la IA
     try:
         resultado = await procesar_homologacion(
             ruta_origen=tipos[TipoDocumento.PENSUM_ORIGEN].ruta,
             ruta_destino=tipos[TipoDocumento.PENSUM_DESTINO].ruta,
         )
     except Exception as e:
-        # Revertir estado si la IA falla
         solicitud.estado = EstadoSolicitud.EN_REVISION
         await db.commit()
         raise HTTPException(status_code=500, detail=f"Error al procesar con IA: {str(e)}")
 
-    # Guardar homologación
     homologacion = Homologacion(
         solicitud_id=solicitud.id,
         resumen_ia=resultado["resumen"],
@@ -129,32 +144,121 @@ async def procesar(
             similitud_porcentaje=item.get("similitud_porcentaje"),
         ))
 
-    # Pasar a pendiente rector
     historial2 = HistorialEstado(
         solicitud_id=solicitud.id,
         usuario_id=usuario.id,
         estado_anterior=EstadoSolicitud.PROCESANDO_IA,
-        estado_nuevo=EstadoSolicitud.PENDIENTE_RECTOR,
+        estado_nuevo=EstadoSolicitud.REVISION_COORDINADOR,
     )
-    solicitud.estado = EstadoSolicitud.PENDIENTE_RECTOR
+    solicitud.estado = EstadoSolicitud.REVISION_COORDINADOR
     db.add(historial2)
     await db.commit()
 
-    # Publicar evento Kafka con datos del estudiante para el email
     estudiante = solicitud.estudiante
     publicar_homologacion_completada(
         solicitud_id=str(solicitud.id),
         homologacion_id=str(homologacion.id),
         tokens=resultado["tokens_utilizados"],
+        email_estudiante=estudiante.email,
+        nombre_estudiante=f"{estudiante.nombre} {estudiante.apellido}",
     )
 
-    # Recargar con asignaturas
     result_final = await db.execute(
         select(Homologacion)
         .where(Homologacion.id == homologacion.id)
         .options(selectinload(Homologacion.asignaturas))
     )
     return result_final.scalar_one()
+
+
+@router.patch(
+    "/{solicitud_id}/asignaturas/{asignatura_id}",
+    response_model=HomologacionAsignaturaResponse,
+    summary="Actualizar estado de una asignatura",
+    description="El coordinador puede modificar el estado y justificación de una asignatura individual.",
+    responses={
+        200: {"description": "Asignatura actualizada"},
+        404: {"description": "Homologación o asignatura no encontrada"},
+        403: {"description": "Solo coordinadores pueden modificar asignaturas"},
+    },
+)
+async def actualizar_asignatura(
+    solicitud_id: UUID,
+    asignatura_id: UUID,
+    body: ActualizarAsignaturaRequest,
+    db: AsyncSession = Depends(get_db),
+    usuario: Usuario = Depends(require_rol(Rol.COORDINADOR, Rol.RECTOR)),
+):
+    result = await db.execute(
+        select(Homologacion).where(Homologacion.solicitud_id == solicitud_id)
+    )
+    homologacion = result.scalar_one_or_none()
+    if not homologacion:
+        raise HTTPException(status_code=404, detail="Homologación no encontrada")
+
+    result_asig = await db.execute(
+        select(HomologacionAsignatura).where(
+            HomologacionAsignatura.id == asignatura_id,
+            HomologacionAsignatura.homologacion_id == homologacion.id,
+        )
+    )
+    asignatura = result_asig.scalar_one_or_none()
+    if not asignatura:
+        raise HTTPException(status_code=404, detail="Asignatura no encontrada")
+
+    asignatura.estado = body.estado
+    if body.justificacion is not None:
+        asignatura.justificacion = body.justificacion
+
+    await db.commit()
+    await db.refresh(asignatura)
+    return asignatura
+
+
+@router.post(
+    "/{solicitud_id}/enviar-rector",
+    status_code=status.HTTP_200_OK,
+    summary="Enviar homologación al rector",
+    description=(
+        "El coordinador envía la homologación revisada al rector para su aprobación. "
+        "La solicitud debe estar en estado REVISION_COORDINADOR."
+    ),
+    responses={
+        200: {"description": "Homologación enviada al rector"},
+        400: {"description": "La solicitud no está en estado REVISION_COORDINADOR"},
+        403: {"description": "Solo coordinadores pueden enviar al rector"},
+        404: {"description": "Solicitud no encontrada"},
+    },
+)
+async def enviar_rector(
+    solicitud_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    usuario: Usuario = Depends(require_rol(Rol.COORDINADOR)),
+):
+    result = await db.execute(
+        select(Solicitud).where(Solicitud.id == solicitud_id)
+    )
+    solicitud = result.scalar_one_or_none()
+    if not solicitud:
+        raise HTTPException(status_code=404, detail="Solicitud no encontrada")
+
+    if solicitud.estado != EstadoSolicitud.REVISION_COORDINADOR:
+        raise HTTPException(
+            status_code=400,
+            detail="La solicitud debe estar en estado REVISION_COORDINADOR para enviar al rector",
+        )
+
+    historial = HistorialEstado(
+        solicitud_id=solicitud.id,
+        usuario_id=usuario.id,
+        estado_anterior=solicitud.estado,
+        estado_nuevo=EstadoSolicitud.PENDIENTE_RECTOR,
+    )
+    solicitud.estado = EstadoSolicitud.PENDIENTE_RECTOR
+    db.add(historial)
+    await db.commit()
+
+    return {"mensaje": "Homologación enviada al rector correctamente"}
 
 
 @router.get(
@@ -188,18 +292,38 @@ async def obtener_homologacion(
 @router.post(
     "/{solicitud_id}/generar-resolucion",
     summary="Generar resolución Word",
-    description="El rector descarga la resolución de homologación en formato Word (.docx).",
+    description="Descarga la resolución de homologación en formato Word (.docx). Solo disponible para solicitudes aprobadas. El estudiante solo puede descargar la resolución de sus propias solicitudes.",
     responses={
         200: {"description": "Archivo Word generado"},
-        404: {"description": "Homologación no encontrada"},
-        403: {"description": "Solo el rector puede generar la resolución"},
+        400: {"description": "La solicitud no está aprobada"},
+        403: {"description": "Sin permisos sobre esta solicitud"},
+        404: {"description": "Solicitud u homologación no encontrada"},
     },
 )
 async def generar_resolucion(
     solicitud_id: UUID,
     db: AsyncSession = Depends(get_db),
-    usuario: Usuario = Depends(require_rol(Rol.RECTOR)),
+    usuario: Usuario = Depends(get_current_user),
 ):
+    result_sol = await db.execute(
+        select(Solicitud)
+        .where(Solicitud.id == solicitud_id)
+        .options(selectinload(Solicitud.estudiante))
+    )
+    solicitud = result_sol.scalar_one_or_none()
+
+    if not solicitud:
+        raise HTTPException(status_code=404, detail="Solicitud no encontrada")
+
+    if solicitud.estado != EstadoSolicitud.APROBADA:
+        raise HTTPException(
+            status_code=400,
+            detail="La resolución solo está disponible para solicitudes aprobadas",
+        )
+
+    if usuario.rol == Rol.ESTUDIANTE and solicitud.estudiante_id != usuario.id:
+        raise HTTPException(status_code=403, detail="Sin permisos sobre esta solicitud")
+
     result = await db.execute(
         select(Homologacion)
         .where(Homologacion.solicitud_id == solicitud_id)
@@ -209,13 +333,6 @@ async def generar_resolucion(
 
     if not homologacion:
         raise HTTPException(status_code=404, detail="Homologación no encontrada")
-
-    result_sol = await db.execute(
-        select(Solicitud)
-        .where(Solicitud.id == solicitud_id)
-        .options(selectinload(Solicitud.estudiante))
-    )
-    solicitud = result_sol.scalar_one_or_none()
 
     ruta = generar_resolucion_docx(homologacion, solicitud)
 

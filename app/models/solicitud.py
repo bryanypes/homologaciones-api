@@ -12,6 +12,7 @@ class EstadoSolicitud(str, enum.Enum):
     ENVIADA = "enviada"
     EN_REVISION = "en_revision"
     PROCESANDO_IA = "procesando_ia"
+    REVISION_COORDINADOR = "revision_coordinador"
     PENDIENTE_RECTOR = "pendiente_rector"
     APROBADA = "aprobada"
     RECHAZADA = "rechazada"

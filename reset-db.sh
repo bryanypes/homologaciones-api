@@ -13,6 +13,6 @@ until [ "$(docker inspect --format '{{.State.Health.Status}}' homologaciones-api
 done
 
 echo "Corriendo migraciones..."
-uv run alembic upgrade head
+uv run python -m alembic upgrade head
 
 echo "Base de datos lista."
