@@ -10,11 +10,12 @@ class TipoDocumento(str, enum.Enum):
     PENSUM_ORIGEN = "pensum_origen"
     PENSUM_DESTINO = "pensum_destino"
     HOMOLOGACION_GENERADA = "homologacion_generada"
+    RESOLUCION = "resolucion"
 
 class Documento(Base):
     __tablename__ = "documentos"
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    solicitud_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("solicitudes.id"), nullable=False)
+    solicitud_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("solicitudes.id"), nullable=False, index=True)
     tipo: Mapped[TipoDocumento] = mapped_column(SAEnum(TipoDocumento, name='tipodocumento', create_type=False, values_callable=lambda e: [m.value for m in e]), nullable=False)
     nombre_original: Mapped[str] = mapped_column(String(255), nullable=False)
     ruta: Mapped[str] = mapped_column(String(500), nullable=False)

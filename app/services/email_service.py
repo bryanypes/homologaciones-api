@@ -1,12 +1,3 @@
-"""
-Servicio de email para notificaciones del sistema de homologaciones.
-
-Usa aiosmtplib para envío asíncrono. Las plantillas están en este mismo módulo
-para evitar dependencias de archivos externos y simplificar el despliegue.
-
-Instalar: uv add aiosmtplib
-"""
-
 import logging
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -48,6 +39,8 @@ _BASE_STYLE = """
               border-top: 1px solid #eee; }
     .btn { display: inline-block; background: #003366; color: #fff; padding: 12px 24px;
            border-radius: 4px; text-decoration: none; margin-top: 16px; }
+    .code-box { background: #f0f0f0; padding: 12px; border-radius: 4px; 
+                font-family: monospace; word-break: break-all; margin: 12px 0; }
 """
 
 
@@ -103,7 +96,6 @@ def _html_cambio_estado(
 def _html_homologacion_completada(
     nombre_estudiante: str,
     solicitud_id: str,
-    tokens_utilizados: int,
 ) -> str:
     return f"""
     <!DOCTYPE html><html><head><meta charset="utf-8">
@@ -128,6 +120,43 @@ def _html_homologacion_completada(
     """
 
 
+def _html_recuperacion_contraseña(
+    nombre_usuario: str,
+    token: str,
+    frontend_url: str = "http://localhost:3000",
+) -> str:
+    """Plantilla HTML para recuperación de contraseña"""
+    enlace = f"{frontend_url}/resetear-contraseña?token={token}"
+    
+    return f"""
+    <!DOCTYPE html><html><head><meta charset="utf-8">
+    <style>{_BASE_STYLE}</style></head><body>
+    <div class="container">
+      <div class="header">
+        <h1>Sistema de Homologaciones — Universidad del Cauca</h1>
+      </div>
+      <div class="body">
+        <p>Estimado/a <strong>{nombre_usuario}</strong>,</p>
+        <p>Recibimos una solicitud para restablecer tu contraseña. 
+           Si no la solicitaste, ignora este correo.</p>
+        
+        <p><strong>Tu token de recuperación:</strong></p>
+        <div class="code-box">{token}</div>
+        
+        <p>Este token es válido por 30 minutos. Accede a tu cuenta con el siguiente enlace:</p>
+        <a href="{enlace}" class="btn">Restablecer Contraseña</a>
+        
+        <p>O copia el token anterior en el formulario de recuperación si accedes directamente.</p>
+      </div>
+      <div class="footer">
+        Este es un mensaje automático. Por favor no responda a este correo.
+        Sistema de Homologaciones — Oficina de Registro y Control Académico.
+      </div>
+    </div>
+    </body></html>
+    """
+
+
 def _texto_plano_cambio_estado(
     nombre_estudiante: str,
     solicitud_id: str,
@@ -140,6 +169,19 @@ def _texto_plano_cambio_estado(
         f"Estimado/a {nombre_estudiante},\n\n"
         f"Su solicitud de homologación (ID: {solicitud_id}) "
         f"ha cambiado al estado: {label}.{obs}\n\n"
+        "Sistema de Homologaciones — Universidad del Cauca"
+    )
+
+
+def _texto_plano_recuperacion_contraseña(
+    nombre_usuario: str,
+    token: str,
+) -> str:
+    """Plantilla de texto plano para recuperación de contraseña"""
+    return (
+        f"Estimado/a {nombre_usuario},\n\n"
+        f"Tu token de recuperación de contraseña es:\n{token}\n\n"
+        "Este token es válido por 30 minutos.\n\n"
         "Sistema de Homologaciones — Universidad del Cauca"
     )
 
@@ -226,7 +268,7 @@ async def notificar_homologacion_completada(
     Llamar desde el worker de Kafka en handle_homologacion_completada.
     """
     asunto = "[Homologaciones] Análisis completado — Pendiente de aprobación"
-    html = _html_homologacion_completada(nombre_estudiante, solicitud_id, tokens_utilizados)
+    html = _html_homologacion_completada(nombre_estudiante, solicitud_id)
     texto = (
         f"Estimado/a {nombre_estudiante},\n\n"
         f"El análisis de su solicitud (ID: {solicitud_id}) ha finalizado. "
@@ -234,3 +276,18 @@ async def notificar_homologacion_completada(
         "Sistema de Homologaciones — Universidad del Cauca"
     )
     await _enviar(email_estudiante, asunto, html, texto)
+
+
+async def enviar_recuperacion_contraseña(
+    email_usuario: str,
+    nombre_usuario: str,
+    token: str,
+    frontend_url: str = "http://localhost:3000",
+) -> None:
+    """
+    Envía el token de recuperación de contraseña al usuario.
+    """
+    asunto = "[Homologaciones] Recuperación de contraseña"
+    html = _html_recuperacion_contraseña(nombre_usuario, token, frontend_url)
+    texto = _texto_plano_recuperacion_contraseña(nombre_usuario, token)
+    await _enviar(email_usuario, asunto, html, texto)

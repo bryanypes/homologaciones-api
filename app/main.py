@@ -3,16 +3,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.api.v1 import auth, solicitudes, documentos, homologaciones, catalogos, academico, usuarios
-from app.workers.homologacion_worker import iniciar_worker_en_background
 from app.core.database import AsyncSessionLocal
 from app.core.seed import seed_catalogos
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(_: FastAPI):
     async with AsyncSessionLocal() as db:
         await seed_catalogos(db)
-    iniciar_worker_en_background()
     yield
 
 

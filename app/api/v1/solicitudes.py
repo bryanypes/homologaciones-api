@@ -2,7 +2,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from uuid import UUID
-from typing import Optional
 from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
@@ -11,10 +10,10 @@ from app.models.usuario import Usuario, Rol
 from app.models.solicitud import Solicitud, EstadoSolicitud, HistorialEstado
 from app.models.academico import Programa, Institucion
 from app.schemas.solicitud import SolicitudCreate, SolicitudResponse, CambiarEstadoRequest, HistorialEstadoResponse
-from app.services.kafka_service import publicar_cambio_estado
 from app.schemas.paginacion import PaginatedResponse
-from pydantic import BaseModel, Field
-from datetime import datetime
+from app.services.email_service import notificar_cambio_estado
+import asyncio
+from pydantic import BaseModel
 from typing import Optional as OptionalType
 
 router = APIRouter(prefix="/solicitudes", tags=["Solicitudes"])
@@ -242,6 +241,28 @@ async def crear_solicitud(
 
 
 @router.get(
+    "/estadisticas",
+    summary="Estadísticas de solicitudes",
+    description="Retorna el total de solicitudes y el conteo agrupado por estado. Solo rector.",
+    responses={403: {"description": "Solo el rector puede ver estadísticas"}},
+)
+async def estadisticas_solicitudes(
+    db: AsyncSession = Depends(get_db),
+    _: Usuario = Depends(require_rol(Rol.RECTOR)),
+):
+    grupos = await db.execute(
+        select(Solicitud.estado, func.count(Solicitud.id)).group_by(Solicitud.estado)
+    )
+    por_estado = {e.value: 0 for e in EstadoSolicitud}
+    total = 0
+    for estado, count in grupos.all():
+        por_estado[estado.value] = count
+        total += count
+
+    return {"total": total, "por_estado": por_estado}
+
+
+@router.get(
     "/",
     response_model=PaginatedResponse[SolicitudResponse],
     summary="Listar solicitudes",
@@ -432,14 +453,13 @@ async def enviar_solicitud(
     await db.refresh(solicitud)
 
     estudiante = solicitud.estudiante
-    publicar_cambio_estado(
+    asyncio.create_task(notificar_cambio_estado(
+        email_estudiante=estudiante.email,
+        nombre_estudiante=f"{estudiante.nombre} {estudiante.apellido}",
         solicitud_id=str(solicitud.id),
         estado_anterior=EstadoSolicitud.BORRADOR.value,
         estado_nuevo=EstadoSolicitud.ENVIADA.value,
-        usuario_id=str(usuario.id),
-        email_estudiante=estudiante.email,
-        nombre_estudiante=f"{estudiante.nombre} {estudiante.apellido}",
-    )
+    ))
 
     return solicitud
 
@@ -487,15 +507,14 @@ async def cambiar_estado(
     await db.refresh(solicitud)
 
     estudiante = solicitud.estudiante
-    publicar_cambio_estado(
-        solicitud_id=str(solicitud.id),
-        estado_anterior=historial.estado_anterior.value,
-        estado_nuevo=nuevo_estado.value,
-        usuario_id=str(usuario.id),
+    asyncio.create_task(notificar_cambio_estado(
         email_estudiante=estudiante.email,
         nombre_estudiante=f"{estudiante.nombre} {estudiante.apellido}",
+        solicitud_id=str(solicitud.id),
+        estado_anterior=historial.estado_anterior.value if historial.estado_anterior else "",
+        estado_nuevo=nuevo_estado.value,
         observacion=data.observacion if data else None,
-    )
+    ))
 
     return solicitud
 
@@ -579,15 +598,14 @@ async def aprobar_solicitud(
     await db.refresh(solicitud)
 
     estudiante = solicitud.estudiante
-    publicar_cambio_estado(
+    asyncio.create_task(notificar_cambio_estado(
+        email_estudiante=estudiante.email,
+        nombre_estudiante=f"{estudiante.nombre} {estudiante.apellido}",
         solicitud_id=str(solicitud.id),
         estado_anterior=EstadoSolicitud.PENDIENTE_RECTOR.value,
         estado_nuevo=EstadoSolicitud.APROBADA.value,
-        usuario_id=str(usuario.id),
-        email_estudiante=estudiante.email,
-        nombre_estudiante=f"{estudiante.nombre} {estudiante.apellido}",
         observacion=data.observacion if data else None,
-    )
+    ))
 
     return solicitud
 
@@ -637,15 +655,14 @@ async def rechazar_solicitud(
     await db.refresh(solicitud)
 
     estudiante = solicitud.estudiante
-    publicar_cambio_estado(
+    asyncio.create_task(notificar_cambio_estado(
+        email_estudiante=estudiante.email,
+        nombre_estudiante=f"{estudiante.nombre} {estudiante.apellido}",
         solicitud_id=str(solicitud.id),
         estado_anterior=EstadoSolicitud.PENDIENTE_RECTOR.value,
         estado_nuevo=EstadoSolicitud.RECHAZADA.value,
-        usuario_id=str(usuario.id),
-        email_estudiante=estudiante.email,
-        nombre_estudiante=f"{estudiante.nombre} {estudiante.apellido}",
         observacion=data.observacion if data else None,
-    )
+    ))
 
     return solicitud
 

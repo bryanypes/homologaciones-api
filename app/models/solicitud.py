@@ -25,7 +25,7 @@ class Solicitud(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     estudiante_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("usuarios.id"), nullable=False
+        UUID(as_uuid=True), ForeignKey("usuarios.id"), nullable=False, index=True
     )
 
     # ── Datos personales del estudiante al momento de la solicitud ───────────
@@ -54,7 +54,7 @@ class Solicitud(Base):
     # ── Estado y auditoría ───────────────────────────────────────────────────
     estado: Mapped[EstadoSolicitud] = mapped_column(
         SAEnum(EstadoSolicitud, values_callable=lambda x: [e.value for e in x]),
-        default=EstadoSolicitud.BORRADOR
+        default=EstadoSolicitud.BORRADOR, index=True
     )
     observaciones: Mapped[str] = mapped_column(Text, nullable=True)
     creado_en: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -90,7 +90,7 @@ class HistorialEstado(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     solicitud_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("solicitudes.id"), nullable=False
+        UUID(as_uuid=True), ForeignKey("solicitudes.id"), nullable=False, index=True
     )
     usuario_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("usuarios.id"), nullable=False

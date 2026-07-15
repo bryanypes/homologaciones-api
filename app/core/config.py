@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    RESET_PASSWORD_TOKEN_EXPIRE_MINUTES: int = 30  # Token de reset válido 30 minutos
 
     #Gemini
     OPENAI_API_KEY: str
@@ -32,6 +33,7 @@ class Settings(BaseSettings):
     # Storage
     UPLOAD_DIR: str = "uploads"
     MAX_FILE_SIZE_MB: int = 10
+    BASE_URL: str = "http://localhost:8000"  # URL base para generar links de documentos
 
     # Email
     SMTP_HOST: Optional[str] = None

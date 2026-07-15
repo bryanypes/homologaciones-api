@@ -5,6 +5,7 @@ Estrategia: extraer texto de los PDFs y enviarlo como texto plano.
 GPT-4o-mini no acepta PDFs como imágenes — solo PNG/JPEG/WebP.
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -77,11 +78,15 @@ Ing. Mecánica UAO → Ing. Software (Res. 0251/2025):
 
 ## INSTRUCCIONES
 
-1. Identifica todas las asignaturas del documento de origen con calificación y créditos.
+1. Identifica todas las asignaturas del documento de origen. Para cada una extrae OBLIGATORIAMENTE:
+   - Nombre exacto de la asignatura
+   - Número de créditos (creditos_origen) — si aparece
+   - Nota o calificación obtenida (calificacion_origen) — busca columnas como "Nota", "Calificación", "Definitiva", "Promedio", "Nota Definitiva", etc. Extrae el valor numérico float. Si no aparece en el documento, usa null.
 2. Identifica todas las asignaturas del documento destino con código, semestre, créditos e intensidad horaria.
 3. Evalúa equivalencias aplicando los criterios.
 4. Incluye SOLO asignaturas con posibilidad real de homologación (HOMOLOGADA o PENDIENTE).
 5. No inventes asignaturas que no estén en el documento destino.
+6. NUNCA omitas calificacion_origen si la nota aparece en el documento, aunque sea en formato distinto (ej: "4,5" → 4.5, "Aprobado con 3.8" → 3.8).
 
 ## ESTADOS VÁLIDOS
 
@@ -129,12 +134,20 @@ def _extraer_json(texto: str) -> dict:
         raise ValueError(f"No se encontró JSON válido: {texto[:500]}")
 
 
-async def procesar_homologacion(ruta_origen: str, ruta_destino: str) -> dict[str, Any]:
+async def procesar_homologacion(
+    rutas_origen: list[str],
+    ruta_destino: str,
+    nombre_estudiante: str = "",
+) -> dict[str, Any]:
     client = _get_client()
 
     logger.info("[AI] Extrayendo texto de PDFs...")
-    texto_origen = _extraer_texto_pdf(ruta_origen)
-    texto_destino = _extraer_texto_pdf(ruta_destino)
+    partes_origen = []
+    for i, ruta in enumerate(rutas_origen, start=1):
+        texto = await asyncio.to_thread(_extraer_texto_pdf, ruta)
+        partes_origen.append(f"--- Documento de origen {i} ---\n{texto}")
+    texto_origen = "\n\n".join(partes_origen)
+    texto_destino = await asyncio.to_thread(_extraer_texto_pdf, ruta_destino)
     logger.info("[AI] Origen: %d chars — Destino: %d chars", len(texto_origen), len(texto_destino))
 
     MAX_CHARS = 40000
@@ -143,12 +156,19 @@ async def procesar_homologacion(ruta_origen: str, ruta_destino: str) -> dict[str
     if len(texto_destino) > MAX_CHARS:
         texto_destino = texto_destino[:MAX_CHARS] + "\n[... documento truncado ...]"
 
+    contexto_estudiante = (
+        f"DATOS DEL ESTUDIANTE (usa este nombre en el resumen, no el del documento):\n"
+        f"Nombre completo: {nombre_estudiante}\n\n"
+        if nombre_estudiante else ""
+    )
+
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {
             "role": "user",
             "content": (
-                "DOCUMENTO 1 — Certificado de notas del estudiante (institución de origen):\n\n"
+                f"{contexto_estudiante}"
+                "DOCUMENTO 1 — Certificado(s) de notas del estudiante (institución de origen):\n\n"
                 f"{texto_origen}\n\n"
                 "---\n\n"
                 "DOCUMENTO 2 — Plan de estudios del programa destino:\n\n"
