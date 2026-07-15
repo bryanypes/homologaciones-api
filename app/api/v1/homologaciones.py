@@ -1,7 +1,7 @@
 import os
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, func
 from uuid import UUID
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import selectinload
@@ -136,6 +136,7 @@ async def procesar(
     await db.flush()
 
     for item in resultado["asignaturas"]:
+        estado_ia = EstadoAsignatura(item["estado"].lower())
         db.add(HomologacionAsignatura(
             homologacion_id=homologacion.id,
             asignatura_origen=item["asignatura_origen"],
@@ -147,7 +148,9 @@ async def procesar(
             creditos_destino=item.get("creditos_destino"),
             intensidad_horaria_destino=item.get("intensidad_horaria_destino"),
             tipo_destino=item.get("tipo_destino"),
-            estado=EstadoAsignatura(item["estado"].lower()),
+            estado=estado_ia,
+            estado_ia_original=estado_ia,
+            fue_corregida=False,
             justificacion=item.get("justificacion"),
             similitud_porcentaje=item.get("similitud_porcentaje"),
         ))
@@ -215,6 +218,8 @@ async def actualizar_asignatura(
     asignatura.estado = body.estado
     if body.justificacion is not None:
         asignatura.justificacion = body.justificacion
+    if asignatura.estado_ia_original is not None:
+        asignatura.fue_corregida = (body.estado != asignatura.estado_ia_original)
 
     await db.commit()
     await db.refresh(asignatura)
@@ -265,6 +270,62 @@ async def enviar_rector(
     await db.commit()
 
     return {"mensaje": "Homologación enviada al rector correctamente"}
+
+
+@router.get(
+    "/estadisticas-ia",
+    summary="Estadísticas de precisión de la IA",
+    description=(
+        "Retorna métricas sobre qué tan seguido el coordinador corrige las decisiones de la IA. "
+        "Útil para medir la calidad del modelo. Solo para coordinadores y rectores."
+    ),
+    responses={403: {"description": "Sin permisos"}},
+)
+async def estadisticas_ia(
+    db: AsyncSession = Depends(get_db),
+    _: Usuario = Depends(require_rol(Rol.COORDINADOR, Rol.RECTOR)),
+):
+    result_total = await db.execute(
+        select(
+            HomologacionAsignatura.estado_ia_original,
+            func.count(HomologacionAsignatura.id).label("total"),
+        )
+        .where(HomologacionAsignatura.estado_ia_original.is_not(None))
+        .group_by(HomologacionAsignatura.estado_ia_original)
+    )
+    result_corr = await db.execute(
+        select(
+            HomologacionAsignatura.estado_ia_original,
+            func.count(HomologacionAsignatura.id).label("corregidas"),
+        )
+        .where(
+            HomologacionAsignatura.estado_ia_original.is_not(None),
+            HomologacionAsignatura.fue_corregida.is_(True),
+        )
+        .group_by(HomologacionAsignatura.estado_ia_original)
+    )
+    totales = {r.estado_ia_original: r.total for r in result_total.all()}
+    corregidas_por_estado = {r.estado_ia_original: r.corregidas for r in result_corr.all()}
+
+    total_global = sum(totales.values())
+    corregidas_global = sum(corregidas_por_estado.values())
+    precision = round(1 - corregidas_global / total_global, 4) if total_global > 0 else None
+
+    por_estado = {
+        estado.value: {
+            "total": total,
+            "corregidas": corregidas_por_estado.get(estado, 0),
+            "precision": round(1 - corregidas_por_estado.get(estado, 0) / total, 4) if total > 0 else None,
+        }
+        for estado, total in totales.items()
+    }
+
+    return {
+        "total_asignaturas_procesadas": total_global,
+        "corregidas_por_coordinador": corregidas_global,
+        "precision_ia": precision,
+        "por_estado_ia": por_estado,
+    }
 
 
 @router.get(

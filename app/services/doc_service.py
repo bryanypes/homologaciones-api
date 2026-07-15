@@ -704,7 +704,7 @@ def generar_resolucion_docx(homologacion, solicitud) -> str:
         fecha_not = f"{hoy.day:02d}/{hoy.month:02d}/{hoy.year}"
 
         datos = {
-            "numero_resolucion": _numero_siguiente(),
+            "numero_resolucion": solicitud.numero_resolucion or "____",
             "fecha_str": fecha_str,
             "nombre_estudiante": nombre_completo,
             "cedula": solicitud.cedula or "",
@@ -751,10 +751,3 @@ def generar_resolucion_docx(homologacion, solicitud) -> str:
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
-def _numero_siguiente() -> str:
-    """
-    Genera el número de resolución. En producción, esto debería venir de
-    un contador en BD (tabla configuracion con campo ultimo_numero_resolucion).
-    Por ahora retorna un placeholder que el coordinador reemplaza manualmente.
-    """
-    return "____"

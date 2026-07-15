@@ -1,10 +1,11 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import String, DateTime, ForeignKey, Text, Enum as SAEnum, Float
+from sqlalchemy import Boolean, String, DateTime, ForeignKey, Text, Enum as SAEnum, Float
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID
 from app.core.database import Base
 import enum
+
 class EstadoAsignatura(str, enum.Enum):
     HOMOLOGADA         = "homologada"
     NO_HOMOLOGADA      = "no_homologada"
@@ -38,6 +39,8 @@ class HomologacionAsignatura(Base):
     intensidad_horaria_destino: Mapped[float] = mapped_column(Float, nullable=True)
     tipo_destino: Mapped[str] = mapped_column(String(10), nullable=True)
     estado: Mapped[EstadoAsignatura] = mapped_column(SAEnum(EstadoAsignatura, name='estadoasignatura', create_type=False, values_callable=lambda e: [m.value for m in e]), nullable=False)
+    estado_ia_original: Mapped[EstadoAsignatura] = mapped_column(SAEnum(EstadoAsignatura, name='estadoasignatura', create_type=False, values_callable=lambda e: [m.value for m in e]), nullable=True)
+    fue_corregida: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     justificacion: Mapped[str] = mapped_column(Text, nullable=True)
     similitud_porcentaje: Mapped[float] = mapped_column(Float, nullable=True)
     homologacion: Mapped["Homologacion"] = relationship("Homologacion", back_populates="asignaturas")
