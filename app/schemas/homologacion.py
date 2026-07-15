@@ -17,6 +17,8 @@ class HomologacionAsignaturaResponse(BaseModel):
     asignatura_destino: Optional[str]
     creditos_destino: Optional[float]
     estado: EstadoAsignatura
+    estado_ia_original: Optional[EstadoAsignatura] = None
+    fue_corregida: bool = False
     justificacion: Optional[str]
     similitud_porcentaje: Optional[float]
 

@@ -45,6 +45,7 @@ class SolicitudResponse(BaseModel):
     programa_origen_id: Optional[UUID] = None
     programa_destino_id: Optional[UUID] = None
 
+    numero_resolucion: Optional[str] = None
     estado: EstadoSolicitud
     observaciones: Optional[str] = None
     creado_en: datetime

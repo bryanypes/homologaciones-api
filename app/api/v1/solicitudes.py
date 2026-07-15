@@ -4,11 +4,14 @@ from sqlalchemy import select, func
 from uuid import UUID
 from sqlalchemy.orm import selectinload
 
+from datetime import datetime, timezone
+
 from app.core.database import get_db
 from app.core.deps import get_current_user, require_rol
 from app.models.usuario import Usuario, Rol
 from app.models.solicitud import Solicitud, EstadoSolicitud, HistorialEstado
 from app.models.academico import Programa, Institucion
+from app.models.resolucion import ResolucionContador
 from app.schemas.solicitud import SolicitudCreate, SolicitudResponse, CambiarEstadoRequest, HistorialEstadoResponse
 from app.schemas.paginacion import PaginatedResponse
 from app.services.email_service import notificar_cambio_estado
@@ -581,6 +584,18 @@ async def aprobar_solicitud(
             status_code=400,
             detail="La solicitud debe estar en estado PENDIENTE_RECTOR para ser aprobada",
         )
+
+    anio_actual = datetime.now(timezone.utc).year
+    result_cnt = await db.execute(
+        select(ResolucionContador).where(ResolucionContador.anio == anio_actual)
+    )
+    contador = result_cnt.scalar_one_or_none()
+    if not contador:
+        contador = ResolucionContador(anio=anio_actual, ultimo_numero=0)
+        db.add(contador)
+        await db.flush()
+    contador.ultimo_numero += 1
+    solicitud.numero_resolucion = f"{contador.ultimo_numero:04d}-{anio_actual}"
 
     historial = HistorialEstado(
         solicitud_id=solicitud.id,

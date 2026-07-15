@@ -52,6 +52,7 @@ class Solicitud(Base):
     )
 
     # ── Estado y auditoría ───────────────────────────────────────────────────
+    numero_resolucion: Mapped[str] = mapped_column(String(30), nullable=True)
     estado: Mapped[EstadoSolicitud] = mapped_column(
         SAEnum(EstadoSolicitud, values_callable=lambda x: [e.value for e in x]),
         default=EstadoSolicitud.BORRADOR, index=True
