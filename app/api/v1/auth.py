@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.core.database import get_db
 from app.core.security import hash_password, verify_password, create_access_token
-from app.core.deps import get_current_user, require_rol
+from app.core.deps import get_current_user
 from app.models.usuario import Usuario, Rol
 from app.schemas.usuario import UsuarioCreate, UsuarioResponse, LoginRequest, TokenResponse, UsuarioUpdate
 import redis.asyncio as aioredis

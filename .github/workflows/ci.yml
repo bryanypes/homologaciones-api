@@ -37,7 +37,7 @@ jobs:
       SECRET_KEY: test_secret_key_para_ci
       ALGORITHM: HS256
       ACCESS_TOKEN_EXPIRE_MINUTES: 60
-      ANTHROPIC_API_KEY: test_key
+      OPENAI_API_KEY: test_key
       KAFKA_BOOTSTRAP_SERVERS: localhost:9092
       UPLOAD_DIR: uploads
       MAX_FILE_SIZE_MB: 10

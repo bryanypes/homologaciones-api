@@ -1,3 +1,4 @@
+import os
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
@@ -16,9 +17,10 @@ from app.schemas.homologacion import (
     HomologacionAsignaturaResponse,
     ActualizarAsignaturaRequest,
 )
+import asyncio
 from app.services.ai_service import procesar_homologacion
 from app.services.doc_service import generar_resolucion_docx
-from app.services.kafka_service import publicar_homologacion_completada
+from app.services.email_service import notificar_homologacion_completada
 
 router = APIRouter(prefix="/homologaciones", tags=["Homologaciones"])
 
@@ -68,16 +70,18 @@ async def procesar(
         select(Documento).where(Documento.solicitud_id == solicitud_id)
     )
     documentos = result_docs.scalars().all()
-    tipos = {d.tipo: d for d in documentos}
 
-    if TipoDocumento.PENSUM_ORIGEN not in tipos:
+    docs_origen = [d for d in documentos if d.tipo == TipoDocumento.PENSUM_ORIGEN]
+    docs_destino = [d for d in documentos if d.tipo == TipoDocumento.PENSUM_DESTINO]
+
+    if not docs_origen:
         raise HTTPException(
             status_code=400,
             detail="Falta el certificado de notas del estudiante. "
                    "El estudiante debe subirlo en POST /documentos/{id}/notas",
         )
 
-    if TipoDocumento.PENSUM_DESTINO not in tipos:
+    if not docs_destino:
         raise HTTPException(
             status_code=400,
             detail="Falta el pensum del programa destino. "
@@ -109,10 +113,14 @@ async def procesar(
     db.add(historial)
     await db.commit()
 
+    estudiante = solicitud.estudiante
+    nombre_estudiante = f"{estudiante.nombre} {estudiante.apellido}"
+
     try:
         resultado = await procesar_homologacion(
-            ruta_origen=tipos[TipoDocumento.PENSUM_ORIGEN].ruta,
-            ruta_destino=tipos[TipoDocumento.PENSUM_DESTINO].ruta,
+            rutas_origen=[d.ruta for d in docs_origen],
+            ruta_destino=docs_destino[0].ruta,
+            nombre_estudiante=nombre_estudiante,
         )
     except Exception as e:
         solicitud.estado = EstadoSolicitud.EN_REVISION
@@ -154,14 +162,12 @@ async def procesar(
     db.add(historial2)
     await db.commit()
 
-    estudiante = solicitud.estudiante
-    publicar_homologacion_completada(
-        solicitud_id=str(solicitud.id),
-        homologacion_id=str(homologacion.id),
-        tokens=resultado["tokens_utilizados"],
+    asyncio.create_task(notificar_homologacion_completada(
         email_estudiante=estudiante.email,
         nombre_estudiante=f"{estudiante.nombre} {estudiante.apellido}",
-    )
+        solicitud_id=str(solicitud.id),
+        tokens_utilizados=resultado["tokens_utilizados"],
+    ))
 
     result_final = await db.execute(
         select(Homologacion)
@@ -315,14 +321,47 @@ async def generar_resolucion(
     if not solicitud:
         raise HTTPException(status_code=404, detail="Solicitud no encontrada")
 
-    if solicitud.estado != EstadoSolicitud.APROBADA:
-        raise HTTPException(
-            status_code=400,
-            detail="La resolución solo está disponible para solicitudes aprobadas",
-        )
+    if usuario.rol == Rol.ESTUDIANTE:
+        if solicitud.estudiante_id != usuario.id:
+            raise HTTPException(status_code=403, detail="Sin permisos sobre esta solicitud")
+        if solicitud.estado != EstadoSolicitud.APROBADA:
+            raise HTTPException(
+                status_code=400,
+                detail="La resolución solo está disponible para solicitudes aprobadas",
+            )
+    elif usuario.rol == Rol.COORDINADOR:
+        estados_coordinador = {
+            EstadoSolicitud.REVISION_COORDINADOR,
+            EstadoSolicitud.PENDIENTE_RECTOR,
+            EstadoSolicitud.APROBADA,
+        }
+        if solicitud.estado not in estados_coordinador:
+            raise HTTPException(
+                status_code=400,
+                detail="La resolución solo está disponible en estados REVISION_COORDINADOR, PENDIENTE_RECTOR o APROBADA",
+            )
+    elif usuario.rol == Rol.RECTOR:
+        estados_rector = {EstadoSolicitud.PENDIENTE_RECTOR, EstadoSolicitud.APROBADA}
+        if solicitud.estado not in estados_rector:
+            raise HTTPException(
+                status_code=400,
+                detail="La resolución solo está disponible en estados PENDIENTE_RECTOR o APROBADA",
+            )
 
-    if usuario.rol == Rol.ESTUDIANTE and solicitud.estudiante_id != usuario.id:
-        raise HTTPException(status_code=403, detail="Sin permisos sobre esta solicitud")
+    # Verificar si ya existe una resolución subida manualmente
+    result_res = await db.execute(
+        select(Documento).where(
+            Documento.solicitud_id == solicitud_id,
+            Documento.tipo == TipoDocumento.RESOLUCION,
+        )
+    )
+    doc_resolucion = result_res.scalar_one_or_none()
+    if doc_resolucion and os.path.exists(doc_resolucion.ruta):
+        return FileResponse(
+            path=doc_resolucion.ruta,
+            media_type=doc_resolucion.mime_type,
+            filename=doc_resolucion.nombre_original,
+        )
 
     result = await db.execute(
         select(Homologacion)

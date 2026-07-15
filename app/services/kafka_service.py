@@ -1,28 +1,37 @@
-from kafka import KafkaProducer, KafkaConsumer
+from kafka import KafkaProducer
 from kafka.errors import KafkaError
 import json
+import logging
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 TOPIC_SOLICITUDES = "solicitudes"
 TOPIC_HOMOLOGACIONES = "homologaciones"
 
+_producer: KafkaProducer | None = None
 
-def get_producer() -> KafkaProducer:
-    return KafkaProducer(
-        bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
-        value_serializer=lambda v: json.dumps(v).encode("utf-8"),
-        key_serializer=lambda k: k.encode("utf-8") if k else None,
-    )
+
+def _get_producer() -> KafkaProducer:
+    global _producer
+    if _producer is None:
+        _producer = KafkaProducer(
+            bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
+            value_serializer=lambda v: json.dumps(v).encode("utf-8"),
+            key_serializer=lambda k: k.encode("utf-8") if k else None,
+            linger_ms=5,
+            retries=3,
+        )
+    return _producer
 
 
 def publicar_evento(topic: str, key: str, payload: dict) -> None:
     try:
-        producer = get_producer()
+        producer = _get_producer()
         producer.send(topic, key=key, value=payload)
         producer.flush()
-        producer.close()
     except KafkaError as e:
-        print(f"[Kafka] Error publicando evento en {topic}: {e}")
+        logger.warning("[Kafka] Error publicando en %s: %s", topic, e)
 
 
 def publicar_cambio_estado(

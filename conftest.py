@@ -75,12 +75,9 @@ def app_test():
     fake_redis.delete = AsyncMock(side_effect=lambda key: _blacklist.pop(key, None))
     fake_redis.aclose = AsyncMock()
 
-    # FIX: publicar_cambio_estado y publicar_homologacion_completada son funciones
-    # síncronas — deben mockearse con MagicMock, no AsyncMock.
-    with patch("app.workers.homologacion_worker.iniciar_worker_en_background", return_value=None), \
-         patch("app.core.deps.aioredis.from_url", return_value=fake_redis), \
-         patch("app.services.kafka_service.publicar_cambio_estado", new_callable=MagicMock), \
-         patch("app.services.kafka_service.publicar_homologacion_completada", new_callable=MagicMock):
+    with patch("app.core.deps.aioredis.from_url", return_value=fake_redis), \
+         patch("app.api.v1.solicitudes.notificar_cambio_estado", new_callable=AsyncMock), \
+         patch("app.api.v1.homologaciones.notificar_homologacion_completada", new_callable=AsyncMock):
 
         from app.main import app
         from app.core.database import Base, get_db

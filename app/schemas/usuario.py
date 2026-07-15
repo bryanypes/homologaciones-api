@@ -33,7 +33,34 @@ class TokenResponse(BaseModel):
     token_type: str = Field(default="bearer")
     usuario: UsuarioResponse
 
+
 class UsuarioUpdate(BaseModel):
-    nombre: Optional[str] = Field(None, example="Carlos")
-    apellido: Optional[str] = Field(None, example="García")
-    password: Optional[str] = Field(None, example="nueva_clave", min_length=6)
+    nombre: Optional[str] = Field(None, example="Carlos", description="Nuevo nombre")
+    apellido: Optional[str] = Field(None, example="García", description="Nuevo apellido")
+    password: Optional[str] = Field(None, example="nueva_clave", min_length=6, description="Nueva contraseña")
+    rol: Optional[Rol] = Field(None, description="Nuevo rol")
+    activo: Optional[bool] = Field(None, description="Activar o desactivar cuenta")
+
+
+class UsuarioEditarPerfil(BaseModel):
+    """Esquema para que el usuario edite su propio perfil"""
+    nombre: Optional[str] = Field(None, example="Carlos", description="Nuevo nombre")
+    apellido: Optional[str] = Field(None, example="García", description="Nuevo apellido")
+    password_actual: Optional[str] = Field(None, description="Contraseña actual (requerida si cambias la contraseña)")
+    password_nueva: Optional[str] = Field(None, example="nueva_clave", min_length=6, description="Nueva contraseña")
+
+
+class SolicitarRecuperacionRequest(BaseModel):
+    """Solicitar token para recuperar contraseña"""
+    email: EmailStr = Field(..., example="carlos@unicauca.edu.co", description="Correo registrado")
+
+
+class RestablecerContraseñaRequest(BaseModel):
+    """Restablecer contraseña con token"""
+    token: str = Field(..., description="Token de recuperación enviado al email")
+    password_nueva: str = Field(..., min_length=6, description="Nueva contraseña")
+
+
+class RecuperacionResponse(BaseModel):
+    """Respuesta de solicitud de recuperación"""
+    mensaje: str = Field(default="Se ha enviado un enlace de recuperación a tu correo")

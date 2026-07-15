@@ -27,7 +27,7 @@ class Homologacion(Base):
 class HomologacionAsignatura(Base):
     __tablename__ = "homologacion_asignaturas"
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    homologacion_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("homologaciones.id"), nullable=False)
+    homologacion_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("homologaciones.id"), nullable=False, index=True)
     asignatura_origen: Mapped[str] = mapped_column(String(255), nullable=False)
     creditos_origen: Mapped[float] = mapped_column(Float, nullable=True)
     calificacion_origen: Mapped[float] = mapped_column(Float, nullable=True)

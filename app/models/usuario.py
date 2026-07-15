@@ -22,3 +22,7 @@ class Usuario(Base):
     activo: Mapped[bool] = mapped_column(Boolean, default=True)
     creado_en: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     actualizado_en: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # ── Recuperación de contraseña ────────────────────────────────
+    reset_token: Mapped[str] = mapped_column(String(255), nullable=True, unique=True, index=True)
+    reset_token_expira: Mapped[datetime] = mapped_column(DateTime, nullable=True)
