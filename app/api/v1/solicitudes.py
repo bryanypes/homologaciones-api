@@ -284,7 +284,7 @@ async def listar_solicitudes(
 ):
     """Lista solicitudes según rol del usuario"""
     
-    query = select(Solicitud)
+    query = select(Solicitud).options(selectinload(Solicitud.estudiante))
     count_query = select(func.count(Solicitud.id))
 
     # Filtros según rol

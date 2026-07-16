@@ -1,5 +1,5 @@
-from pydantic import BaseModel, EmailStr, field_validator
-from typing import Optional
+from pydantic import BaseModel, EmailStr, field_validator, model_validator
+from typing import Optional, Any
 from uuid import UUID
 from datetime import datetime
 from app.models.solicitud import EstadoSolicitud
@@ -33,6 +33,9 @@ class SolicitudCreate(BaseModel):
 class SolicitudResponse(BaseModel):
     id: UUID
     estudiante_id: UUID
+    nombre_estudiante: Optional[str] = None
+    apellido_estudiante: Optional[str] = None
+    email_estudiante: Optional[str] = None
 
     cedula: Optional[str] = None
     telefono: Optional[str] = None
@@ -52,6 +55,20 @@ class SolicitudResponse(BaseModel):
     actualizado_en: datetime
 
     model_config = {"from_attributes": True}
+
+    @model_validator(mode="before")
+    @classmethod
+    def _extraer_estudiante(cls, obj: Any) -> Any:
+        if isinstance(obj, dict):
+            return obj
+        data = dict(obj.__dict__)
+        data.pop("_sa_instance_state", None)
+        est = data.get("estudiante")
+        if est is not None:
+            data["nombre_estudiante"] = getattr(est, "nombre", None)
+            data["apellido_estudiante"] = getattr(est, "apellido", None)
+            data["email_estudiante"] = getattr(est, "email", None)
+        return data
 
 
 class CambiarEstadoRequest(BaseModel):
