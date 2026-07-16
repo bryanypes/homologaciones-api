@@ -13,6 +13,7 @@ from typing import Any
 
 from openai import AsyncOpenAI
 from app.core.config import settings
+from app.services import storage_service
 
 logger = logging.getLogger(__name__)
 
@@ -142,12 +143,19 @@ async def procesar_homologacion(
     client = _get_client()
 
     logger.info("[AI] Extrayendo texto de PDFs...")
-    partes_origen = []
-    for i, ruta in enumerate(rutas_origen, start=1):
-        texto = await asyncio.to_thread(_extraer_texto_pdf, ruta)
-        partes_origen.append(f"--- Documento de origen {i} ---\n{texto}")
-    texto_origen = "\n\n".join(partes_origen)
-    texto_destino = await asyncio.to_thread(_extraer_texto_pdf, ruta_destino)
+    paths_origen = [await storage_service.obtener_ruta_local(k) for k in rutas_origen]
+    path_destino = await storage_service.obtener_ruta_local(ruta_destino)
+    try:
+        partes_origen = []
+        for i, path in enumerate(paths_origen, start=1):
+            texto = await asyncio.to_thread(_extraer_texto_pdf, path)
+            partes_origen.append(f"--- Documento de origen {i} ---\n{texto}")
+        texto_origen = "\n\n".join(partes_origen)
+        texto_destino = await asyncio.to_thread(_extraer_texto_pdf, path_destino)
+    finally:
+        for path in paths_origen:
+            storage_service.liberar_ruta_local(path)
+        storage_service.liberar_ruta_local(path_destino)
     logger.info("[AI] Origen: %d chars — Destino: %d chars", len(texto_origen), len(texto_destino))
 
     MAX_CHARS = 40000

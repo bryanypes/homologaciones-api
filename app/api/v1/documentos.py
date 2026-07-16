@@ -1,8 +1,6 @@
-import asyncio
-import os
 import uuid as uuid_module
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from uuid import UUID
@@ -14,6 +12,7 @@ from app.models.usuario import Usuario, Rol
 from app.models.solicitud import Solicitud, EstadoSolicitud
 from app.models.documento import Documento, TipoDocumento
 from app.schemas.documento import DocumentoResponse
+from app.services import storage_service
 
 router = APIRouter(prefix="/documentos", tags=["Documentos"])
 
@@ -58,14 +57,8 @@ async def _leer_y_validar(file: UploadFile) -> bytes:
     return contenido
 
 
-async def _guardar_en_disco(contenido: bytes, nombre_unico: str) -> str:
-    ruta = os.path.join(settings.UPLOAD_DIR, nombre_unico)
-    def _write():
-        os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-        with open(ruta, "wb") as f:
-            f.write(contenido)
-    await asyncio.to_thread(_write)
-    return ruta
+async def _guardar_archivo(contenido: bytes, nombre_unico: str, content_type: str = "application/pdf") -> str:
+    return await storage_service.subir(contenido, nombre_unico, content_type)
 
 
 async def _obtener_solicitud(solicitud_id: UUID, db: AsyncSession) -> Solicitud:
@@ -92,7 +85,7 @@ async def _upsert_documento(
     ext = ".docx" if mime == MIME_DOCX else ".pdf"
     contenido = await _leer_y_validar(file)
     nombre_unico = f"{solicitud_id}_{tipo.value}{ext}"
-    ruta = await _guardar_en_disco(contenido, nombre_unico)
+    ruta = await _guardar_archivo(contenido, nombre_unico, mime)
 
     result = await db.execute(
         select(Documento).where(
@@ -198,7 +191,7 @@ async def subir_notas_estudiante(
     contenido = await _leer_y_validar(file)
     sufijo = uuid_module.uuid4().hex
     nombre_unico = f"{solicitud_id}_pensum_origen_{sufijo}.pdf"
-    ruta = await _guardar_en_disco(contenido, nombre_unico)
+    ruta = await _guardar_archivo(contenido, nombre_unico)
 
     doc = Documento(
         solicitud_id=solicitud_id,
@@ -261,11 +254,7 @@ async def eliminar_documento(
     if not documento:
         raise HTTPException(status_code=404, detail="Documento no encontrado")
 
-    try:
-        os.remove(documento.ruta)
-    except OSError:
-        pass
-
+    await storage_service.eliminar(documento.ruta)
     await db.delete(documento)
     await db.commit()
 
@@ -424,14 +413,16 @@ async def descargar_documento(
     if not documento:
         raise HTTPException(status_code=404, detail="Documento no encontrado")
 
-    if not os.path.exists(documento.ruta):
+    try:
+        contenido = await storage_service.descargar(documento.ruta)
+    except Exception:
         raise HTTPException(
             status_code=404,
             detail="El archivo no existe en el servidor. Contacta al administrador.",
         )
 
-    return FileResponse(
-        path=documento.ruta,
+    return Response(
+        content=contenido,
         media_type=documento.mime_type,
-        filename=documento.nombre_original,
+        headers={"Content-Disposition": f'attachment; filename="{documento.nombre_original}"'},
     )
