@@ -175,7 +175,10 @@ async def procesar(
     result_final = await db.execute(
         select(Homologacion)
         .where(Homologacion.id == homologacion.id)
-        .options(selectinload(Homologacion.asignaturas))
+        .options(
+            selectinload(Homologacion.asignaturas),
+            selectinload(Homologacion.solicitud).selectinload(Solicitud.estudiante),
+        )
     )
     return result_final.scalar_one()
 
@@ -346,7 +349,10 @@ async def obtener_homologacion(
     result = await db.execute(
         select(Homologacion)
         .where(Homologacion.solicitud_id == solicitud_id)
-        .options(selectinload(Homologacion.asignaturas))
+        .options(
+            selectinload(Homologacion.asignaturas),
+            selectinload(Homologacion.solicitud).selectinload(Solicitud.estudiante),
+        )
     )
     homologacion = result.scalar_one_or_none()
 
