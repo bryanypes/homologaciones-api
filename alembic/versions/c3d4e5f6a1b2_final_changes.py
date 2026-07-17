@@ -18,17 +18,18 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    connection = op.get_bind()
+    bind = op.get_bind()
+    engine = bind.engine
 
-    # 1. Agregar 'vicerrector' al enum de rol, fuera de la transacción
-    #    principal para que quede comprometido antes de usarlo
-    with connection.execution_options(isolation_level="AUTOCOMMIT"):
-        connection.execute(sa.text("ALTER TYPE rol ADD VALUE IF NOT EXISTS 'vicerrector'"))
+    # Conexión nueva e independiente de la transacción de Alembic,
+    # para que el ALTER TYPE se comprometa de inmediato
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as autocommit_conn:
+        autocommit_conn.execute(sa.text("ALTER TYPE rol ADD VALUE IF NOT EXISTS 'vicerrector'"))
 
-    # 2. Migrar usuarios existentes con rol 'rector' a 'vicerrector'
+    # Esto corre en la transacción normal de la migración, y ya puede
+    # usar 'vicerrector' porque fue comprometido por otra conexión
     op.execute("UPDATE usuarios SET rol = 'vicerrector' WHERE rol = 'rector'")
 
-    # 3. Agregar campos al modelo Asignatura para pensum completo
     op.add_column('asignaturas', sa.Column('codigo', sa.String(50), nullable=True))
     op.add_column('asignaturas', sa.Column('semestre', sa.Integer(), nullable=True))
     op.add_column('asignaturas', sa.Column('tipo', sa.String(10), nullable=True))
@@ -42,5 +43,4 @@ def downgrade() -> None:
     op.drop_column('asignaturas', 'tipo')
     op.drop_column('asignaturas', 'semestre')
     op.drop_column('asignaturas', 'codigo')
-    # Revertir usuarios (nota: el valor 'vicerrector' queda en el enum pero sin usuarios)
     op.execute("UPDATE usuarios SET rol = 'rector' WHERE rol = 'vicerrector'")
