@@ -14,7 +14,7 @@ from app.models.academico import Programa, Institucion
 from app.models.resolucion import ResolucionContador
 from app.schemas.solicitud import SolicitudCreate, SolicitudResponse, CambiarEstadoRequest, HistorialEstadoResponse
 from app.schemas.paginacion import PaginatedResponse
-from app.services.email_service import notificar_cambio_estado
+from app.services.email_service import notificar_cambio_estado, notificar_mercadeo_homologacion_aprobada
 import asyncio
 from pydantic import BaseModel
 from typing import Optional as OptionalType
@@ -251,7 +251,7 @@ async def crear_solicitud(
 )
 async def estadisticas_solicitudes(
     db: AsyncSession = Depends(get_db),
-    _: Usuario = Depends(require_rol(Rol.RECTOR)),
+    _: Usuario = Depends(require_rol(Rol.VICERRECTOR)),
 ):
     grupos = await db.execute(
         select(Solicitud.estado, func.count(Solicitud.id)).group_by(Solicitud.estado)
@@ -483,7 +483,7 @@ async def cambiar_estado(
     nuevo_estado: EstadoSolicitud = Query(..., description="Nuevo estado"),
     data: CambiarEstadoRequest = None,
     db: AsyncSession = Depends(get_db),
-    usuario: Usuario = Depends(require_rol(Rol.COORDINADOR, Rol.RECTOR)),
+    usuario: Usuario = Depends(require_rol(Rol.COORDINADOR, Rol.VICERRECTOR)),
 ):
     """Cambiar el estado de una solicitud"""
     solicitud = await _obtener_solicitud(solicitud_id, db)
@@ -575,7 +575,7 @@ async def aprobar_solicitud(
     solicitud_id: UUID,
     data: CambiarEstadoRequest = None,
     db: AsyncSession = Depends(get_db),
-    usuario: Usuario = Depends(require_rol(Rol.RECTOR)),
+    usuario: Usuario = Depends(require_rol(Rol.VICERRECTOR)),
 ):
     solicitud = await _obtener_solicitud(solicitud_id, db)
 
@@ -621,6 +621,13 @@ async def aprobar_solicitud(
         estado_nuevo=EstadoSolicitud.APROBADA.value,
         observacion=data.observacion if data else None,
     ))
+    asyncio.create_task(notificar_mercadeo_homologacion_aprobada(
+        nombre_estudiante=f"{estudiante.nombre} {estudiante.apellido}",
+        solicitud_id=str(solicitud.id),
+        numero_resolucion=solicitud.numero_resolucion or "",
+        programa_destino=solicitud.programa_destino or "",
+        institucion_origen=solicitud.institucion_origen or "",
+    ))
 
     return solicitud
 
@@ -644,7 +651,7 @@ async def rechazar_solicitud(
     solicitud_id: UUID,
     data: CambiarEstadoRequest = None,
     db: AsyncSession = Depends(get_db),
-    usuario: Usuario = Depends(require_rol(Rol.RECTOR)),
+    usuario: Usuario = Depends(require_rol(Rol.VICERRECTOR)),
 ):
     solicitud = await _obtener_solicitud(solicitud_id, db)
 

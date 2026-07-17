@@ -19,7 +19,7 @@ router = APIRouter(prefix="/auth", tags=["Autenticación"])
     summary="Registrar estudiante",
     description=(
         "Registro público. Solo crea usuarios con rol **estudiante**. "
-        "Para crear coordinadores o rectores, el rector debe usar `POST /usuarios/`."
+        "Para crear coordinadores o vicerrectores, el vicerrector debe usar `POST /usuarios/`."
     ),
     responses={
         201: {"description": "Usuario creado exitosamente"},
@@ -32,7 +32,7 @@ async def register(data: UsuarioCreate, db: AsyncSession = Depends(get_db)):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="El registro público solo permite el rol 'estudiante'. "
-                   "Para otros roles, contacte al rector.",
+                   "Para otros roles, contacte al administrador del sistema.",
         )
 
     result = await db.execute(select(Usuario).where(Usuario.email == data.email))

@@ -8,7 +8,7 @@ class UsuarioBase(BaseModel):
     nombre: str = Field(..., example="Carlos", description="Nombre del usuario")
     apellido: str = Field(..., example="García", description="Apellido del usuario")
     email: EmailStr = Field(..., example="carlos@unicauca.edu.co", description="Correo institucional")
-    rol: Rol = Field(..., example="estudiante", description="Rol: estudiante, coordinador o rector")
+    rol: Rol = Field(..., example="estudiante", description="Rol: estudiante, coordinador, vicerrector o admin")
 
 
 class UsuarioCreate(UsuarioBase):

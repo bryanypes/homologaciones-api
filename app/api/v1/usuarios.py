@@ -27,7 +27,7 @@ router = APIRouter(prefix="/usuarios", tags=["Usuarios"])
     "/",
     response_model=PaginatedResponse[UsuarioResponse],
     summary="Listar usuarios",
-    description="Coordinadores y rectores pueden listar usuarios con filtros y paginación.",
+    description="El administrador puede listar y filtrar todos los usuarios.",
 )
 async def listar_usuarios(
     rol: Optional[Rol] = Query(None, description="Filtrar por rol"),
@@ -35,7 +35,7 @@ async def listar_usuarios(
     page: int = Query(1, ge=1, description="Número de página"),
     size: int = Query(20, ge=1, le=100, description="Resultados por página"),
     db: AsyncSession = Depends(get_db),
-    usuario: Usuario = Depends(require_rol(Rol.COORDINADOR, Rol.RECTOR)),
+    usuario: Usuario = Depends(require_rol(Rol.ADMIN)),
 ):
     query = select(Usuario)
     count_query = select(func.count(Usuario.id))
@@ -80,7 +80,7 @@ async def obtener_mi_perfil(
 async def obtener_usuario(
     usuario_id: UUID,
     db: AsyncSession = Depends(get_db),
-    _: Usuario = Depends(require_rol(Rol.COORDINADOR, Rol.RECTOR)),
+    _: Usuario = Depends(require_rol(Rol.ADMIN)),
 ):
     result = await db.execute(select(Usuario).where(Usuario.id == usuario_id))
     usuario = result.scalar_one_or_none()
@@ -93,21 +93,21 @@ async def obtener_usuario(
     "/",
     response_model=UsuarioResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Crear usuario (rector)",
+    summary="Crear usuario (admin)",
     description=(
-        "Solo el rector puede crear usuarios con rol **coordinador** o **rector**. "
-        "También puede crear estudiantes si lo requiere."
+        "Solo el administrador puede crear usuarios con cualquier rol. "
+        "El registro público solo permite estudiantes."
     ),
     responses={
         201: {"description": "Usuario creado"},
         400: {"description": "Email ya registrado"},
-        403: {"description": "Solo el rector puede crear usuarios"},
+        403: {"description": "Solo el administrador puede crear usuarios"},
     },
 )
 async def crear_usuario(
     data: UsuarioCreate,
     db: AsyncSession = Depends(get_db),
-    _: Usuario = Depends(require_rol(Rol.RECTOR)),
+    _: Usuario = Depends(require_rol(Rol.ADMIN)),
 ):
     result = await db.execute(select(Usuario).where(Usuario.email == data.email))
     if result.scalar_one_or_none():
@@ -175,18 +175,18 @@ async def editar_mi_perfil(
 @router.patch(
     "/{usuario_id}",
     response_model=UsuarioResponse,
-    summary="Actualizar usuario (rector)",
-    description="El rector puede actualizar nombre, apellido o contraseña de cualquier usuario.",
+    summary="Actualizar usuario (admin)",
+    description="El administrador puede actualizar nombre, apellido, rol o contraseña de cualquier usuario.",
     responses={
         404: {"description": "Usuario no encontrado"},
-        403: {"description": "Solo el rector puede modificar usuarios"},
+        403: {"description": "Solo el administrador puede modificar usuarios"},
     },
 )
 async def actualizar_usuario(
     usuario_id: UUID,
     data: UsuarioUpdate,
     db: AsyncSession = Depends(get_db),
-    _: Usuario = Depends(require_rol(Rol.RECTOR)),
+    _: Usuario = Depends(require_rol(Rol.ADMIN)),
 ):
     result = await db.execute(select(Usuario).where(Usuario.id == usuario_id))
     usuario = result.scalar_one_or_none()
@@ -322,7 +322,7 @@ async def restablecer_contraseña(
 async def activar_usuario(
     usuario_id: UUID,
     db: AsyncSession = Depends(get_db),
-    _: Usuario = Depends(require_rol(Rol.RECTOR)),
+    _: Usuario = Depends(require_rol(Rol.ADMIN)),
 ):
     result = await db.execute(select(Usuario).where(Usuario.id == usuario_id))
     usuario = result.scalar_one_or_none()
@@ -350,7 +350,7 @@ async def activar_usuario(
 async def desactivar_usuario(
     usuario_id: UUID,
     db: AsyncSession = Depends(get_db),
-    rector: Usuario = Depends(require_rol(Rol.RECTOR)),
+    rector: Usuario = Depends(require_rol(Rol.ADMIN)),
 ):
     if usuario_id == rector.id:
         raise HTTPException(status_code=400, detail="No puedes desactivar tu propia cuenta")
@@ -382,7 +382,7 @@ async def cambiar_rol(
     usuario_id: UUID,
     rol: Rol = Query(..., description="Nuevo rol a asignar"),
     db: AsyncSession = Depends(get_db),
-    rector: Usuario = Depends(require_rol(Rol.RECTOR)),
+    rector: Usuario = Depends(require_rol(Rol.ADMIN)),
 ):
     if usuario_id == rector.id:
         raise HTTPException(status_code=400, detail="No puedes cambiar tu propio rol")
@@ -417,7 +417,7 @@ async def cambiar_rol(
 async def eliminar_usuario(
     usuario_id: UUID,
     db: AsyncSession = Depends(get_db),
-    rector: Usuario = Depends(require_rol(Rol.RECTOR)),
+    rector: Usuario = Depends(require_rol(Rol.ADMIN)),
 ):
     if usuario_id == rector.id:
         raise HTTPException(status_code=400, detail="No puedes eliminar tu propia cuenta")

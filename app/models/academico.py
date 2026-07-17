@@ -54,5 +54,10 @@ class Asignatura(Base):
     nombre: Mapped[str] = mapped_column(String(255), nullable=False)
     creditos: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
     programa_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("programas.id"), nullable=False)
+    codigo: Mapped[str] = mapped_column(String(50), nullable=True)
+    semestre: Mapped[int] = mapped_column(Integer, nullable=True)
+    tipo: Mapped[str] = mapped_column(String(10), nullable=True)
+    intensidad_horaria: Mapped[int] = mapped_column(Integer, nullable=True)
+    linea_continuidad: Mapped[str] = mapped_column(String(100), nullable=True)
 
     programa: Mapped["Programa"] = relationship("Programa", back_populates="asignaturas")

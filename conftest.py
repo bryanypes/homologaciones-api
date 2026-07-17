@@ -40,7 +40,9 @@ async def override_get_db():
 
 
 # ── Datos de test ──────────────────────────────────────────────
-RECTOR_EMAIL = "rector@universidad.edu.co"
+ADMIN_EMAIL = "admin@universidad.edu.co"
+ADMIN_PASSWORD = "Admin2024!"
+RECTOR_EMAIL = "vicerrector@universidad.edu.co"
 RECTOR_PASSWORD = "Rector2024!"
 
 ESTUDIANTE = {
@@ -100,14 +102,23 @@ async def setup_db(app_test):
         await conn.run_sync(Base.metadata.create_all)
 
     async with TestSessionLocal() as db:
+        admin = Usuario(
+            nombre="Admin",
+            apellido="Sistema",
+            email=ADMIN_EMAIL,
+            password_hash=hash_password(ADMIN_PASSWORD),
+            rol=Rol.ADMIN,
+            activo=True,
+        )
         rector = Usuario(
             nombre="Pedro",
             apellido="Rector",
             email=RECTOR_EMAIL,
             password_hash=hash_password(RECTOR_PASSWORD),
-            rol=Rol.RECTOR,
+            rol=Rol.VICERRECTOR,
             activo=True,
         )
+        db.add(admin)
         db.add(rector)
         await db.commit()
 
@@ -142,6 +153,11 @@ async def _registrar_estudiante(client: AsyncClient, datos: dict) -> str:
 
 # ── Tokens ─────────────────────────────────────────────────────
 @pytest.fixture(scope="session")
+async def token_admin(client: AsyncClient) -> str:
+    return await _login(client, ADMIN_EMAIL, ADMIN_PASSWORD)
+
+
+@pytest.fixture(scope="session")
 async def token_rector(client: AsyncClient) -> str:
     return await _login(client, RECTOR_EMAIL, RECTOR_PASSWORD)
 
@@ -157,11 +173,11 @@ async def token_estudiante2(client: AsyncClient) -> str:
 
 
 @pytest.fixture(scope="session")
-async def token_coordinador(client: AsyncClient, token_rector: str) -> str:
+async def token_coordinador(client: AsyncClient, token_admin: str) -> str:
     email = f"coord_{uuid4().hex[:8]}@test.com"
     resp = await client.post(
         "/api/v1/usuarios/",
-        headers={"Authorization": f"Bearer {token_rector}"},
+        headers={"Authorization": f"Bearer {token_admin}"},
         json={**COORDINADOR, "email": email},
     )
     assert resp.status_code == 201, f"Crear coordinador falló: {resp.text}"

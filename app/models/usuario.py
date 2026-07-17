@@ -7,9 +7,10 @@ from app.core.database import Base
 import enum
 
 class Rol(str, enum.Enum):
+    ADMIN = "admin"
     ESTUDIANTE = "estudiante"
     COORDINADOR = "coordinador"
-    RECTOR = "rector"
+    VICERRECTOR = "vicerrector"
 
 class Usuario(Base):
     __tablename__ = "usuarios"
