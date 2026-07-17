@@ -549,13 +549,13 @@ async def obtener_homologacion(
     summary="Generar resolución Word",
     description=(
         "Descarga la resolución de homologación en formato Word (.docx). "
-        "Solo disponible para solicitudes aprobadas (estudiante) o en revisión (coordinador/vicerrector)."
+        "Exclusivo para coordinador, vicerrector y admin. El estudiante no tiene acceso."
     ),
 )
 async def generar_resolucion(
     solicitud_id: UUID,
     db: AsyncSession = Depends(get_db),
-    usuario: Usuario = Depends(get_current_user),
+    usuario: Usuario = Depends(require_rol(Rol.COORDINADOR, Rol.VICERRECTOR, Rol.ADMIN)),
 ):
     result_sol = await db.execute(
         select(Solicitud)
@@ -567,28 +567,20 @@ async def generar_resolucion(
     if not solicitud:
         raise HTTPException(status_code=404, detail="Solicitud no encontrada")
 
-    if usuario.rol == Rol.ESTUDIANTE:
-        if solicitud.estudiante_id != usuario.id:
-            raise HTTPException(status_code=403, detail="Sin permisos sobre esta solicitud")
-        if solicitud.estado != EstadoSolicitud.APROBADA:
-            raise HTTPException(
-                status_code=400,
-                detail="La resolución solo está disponible para solicitudes aprobadas",
-            )
-    elif usuario.rol == Rol.COORDINADOR:
-        estados_coordinador = {
+    if usuario.rol == Rol.COORDINADOR:
+        estados_permitidos = {
             EstadoSolicitud.REVISION_COORDINADOR,
             EstadoSolicitud.PENDIENTE_RECTOR,
             EstadoSolicitud.APROBADA,
         }
-        if solicitud.estado not in estados_coordinador:
+        if solicitud.estado not in estados_permitidos:
             raise HTTPException(
                 status_code=400,
                 detail="La resolución solo está disponible en estados REVISION_COORDINADOR, PENDIENTE_RECTOR o APROBADA",
             )
     elif usuario.rol == Rol.VICERRECTOR:
-        estados_vicerrector = {EstadoSolicitud.PENDIENTE_RECTOR, EstadoSolicitud.APROBADA}
-        if solicitud.estado not in estados_vicerrector:
+        estados_permitidos = {EstadoSolicitud.PENDIENTE_RECTOR, EstadoSolicitud.APROBADA}
+        if solicitud.estado not in estados_permitidos:
             raise HTTPException(
                 status_code=400,
                 detail="La resolución solo está disponible en estados PENDIENTE_RECTOR o APROBADA",

@@ -222,12 +222,28 @@ async def crear_solicitud(
             detail="Debes elegir un programa destino del catálogo o escribir 'Otra'"
         )
 
+    # Cédula: preferir la del perfil del usuario; si se provee una diferente, actualizarla
+    cedula_final = usuario.cedula
+    if data.cedula and data.cedula != usuario.cedula:
+        dup = await db.execute(
+            select(Usuario).where(Usuario.cedula == data.cedula, Usuario.id != usuario.id)
+        )
+        if dup.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="Ya existe un usuario registrado con esa cédula")
+        usuario.cedula = data.cedula
+        cedula_final = data.cedula
+
+    # Teléfono: ídem
+    telefono_final = data.telefono or usuario.telefono
+    if data.telefono and data.telefono != usuario.telefono:
+        usuario.telefono = data.telefono
+
     # Crear solicitud
     solicitud = Solicitud(
         estudiante_id=usuario.id,
-        cedula=data.cedula,
-        telefono=data.telefono,
-        correo_contacto=data.correo_contacto,
+        cedula=cedula_final,
+        telefono=telefono_final,
+        correo_contacto=data.correo_contacto or usuario.email,
         institucion_origen=institucion_origen,
         programa_origen=programa_origen,
         programa_origen_id=programa_origen_id,
@@ -364,10 +380,19 @@ async def actualizar_solicitud(
             detail="Solo se pueden editar solicitudes en estado BORRADOR"
         )
 
-    # Actualizar datos personales
-    if data.cedula is not None:
+    # Actualizar datos personales (con validación de unicidad de cédula)
+    if data.cedula is not None and data.cedula != usuario.cedula:
+        dup = await db.execute(
+            select(Usuario).where(Usuario.cedula == data.cedula, Usuario.id != usuario.id)
+        )
+        if dup.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="Ya existe un usuario registrado con esa cédula")
+        usuario.cedula = data.cedula
+        solicitud.cedula = data.cedula
+    elif data.cedula is not None:
         solicitud.cedula = data.cedula
     if data.telefono is not None:
+        usuario.telefono = data.telefono
         solicitud.telefono = data.telefono
     if data.correo_contacto is not None:
         solicitud.correo_contacto = data.correo_contacto

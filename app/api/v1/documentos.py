@@ -373,9 +373,11 @@ async def listar_documentos(
     solicitud = await _obtener_solicitud(solicitud_id, db)
     await _verificar_scope(solicitud, usuario)
 
-    result = await db.execute(
-        select(Documento).where(Documento.solicitud_id == solicitud_id)
-    )
+    query = select(Documento).where(Documento.solicitud_id == solicitud_id)
+    if usuario.rol == Rol.ESTUDIANTE:
+        query = query.where(Documento.tipo != TipoDocumento.RESOLUCION)
+
+    result = await db.execute(query)
     documentos = result.scalars().all()
     return [_documento_a_response(doc) for doc in documentos]
 
@@ -412,6 +414,9 @@ async def descargar_documento(
 
     if not documento:
         raise HTTPException(status_code=404, detail="Documento no encontrado")
+
+    if usuario.rol == Rol.ESTUDIANTE and documento.tipo == TipoDocumento.RESOLUCION:
+        raise HTTPException(status_code=403, detail="No tienes permiso para descargar este documento")
 
     try:
         contenido = await storage_service.descargar(documento.ruta)
