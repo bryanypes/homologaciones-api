@@ -18,10 +18,16 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # 1. Agregar 'vicerrector' al enum de rol (en PostgreSQL no se pueden quitar valores)
-    op.execute("ALTER TYPE rol ADD VALUE IF NOT EXISTS 'vicerrector'")
+    connection = op.get_bind()
+
+    # 1. Agregar 'vicerrector' al enum de rol, fuera de la transacción
+    #    principal para que quede comprometido antes de usarlo
+    with connection.execution_options(isolation_level="AUTOCOMMIT"):
+        connection.execute(sa.text("ALTER TYPE rol ADD VALUE IF NOT EXISTS 'vicerrector'"))
+
     # 2. Migrar usuarios existentes con rol 'rector' a 'vicerrector'
     op.execute("UPDATE usuarios SET rol = 'vicerrector' WHERE rol = 'rector'")
+
     # 3. Agregar campos al modelo Asignatura para pensum completo
     op.add_column('asignaturas', sa.Column('codigo', sa.String(50), nullable=True))
     op.add_column('asignaturas', sa.Column('semestre', sa.Integer(), nullable=True))
