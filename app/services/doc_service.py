@@ -211,9 +211,10 @@ def _tabla_homologadas(asignaturas: list, prog_origen: str, inst_origen: str) ->
     return table
 
 
-def _tabla_cursos_pendientes(cursos_pendientes: list) -> str:
+def _tabla_cursos_pendientes(cursos_pendientes: list, show_header: bool = True) -> str:
     """
     Tabla ARTÍCULO 2: Plan de estudios con cursos pendientes agrupados por semestre.
+    show_header=False omite el título global (usado para la tabla de Requisitos de Grado).
     """
     W = [500, 1000, 4500, 600, 600, 600, 1560]
     total_w = sum(W)
@@ -231,7 +232,7 @@ def _tabla_cursos_pendientes(cursos_pendientes: list) -> str:
         return f"<w:tr>{cells}</w:tr>"
 
     def total_row(cr: int, tp: int) -> str:
-        label_cell = f"<w:tc><w:tcPr><w:tcW w:w='{sum(W[:3])}' w:type='dxa'/><w:gridSpan w:val='3'/></w:tcPr><w:p><w:pPr><w:spacing w:before='40' w:after='40'/></w:pPr><w:r><w:rPr><w:rFonts w:ascii='Arial Narrow' w:hAnsi='Arial Narrow' w:cs='Arial'/><w:b/><w:sz w:val='18'/><w:szCs w:val='18'/></w:rPr><w:t>Total Créditos Semestre</w:t></w:r></w:p></w:tc>"
+        label_cell = f"<w:tc><w:tcPr><w:tcW w:w='{sum(W[:3])}' w:type='dxa'/><w:gridSpan w:val='3'/></w:tcPr><w:p><w:pPr><w:spacing w:before='40' w:after='40'/></w:pPr><w:r><w:rPr><w:rFonts w:ascii='Arial Narrow' w:hAnsi='Arial Narrow' w:cs='Arial'/><w:b/><w:sz w:val='18'/><w:szCs w:val='18'/></w:rPr><w:t>Total de Créditos</w:t></w:r></w:p></w:tc>"
         cr_cell = _cell(str(cr), bold=True, width=W[3], align="center")
         tp_cell = _cell(str(tp), bold=True, width=W[4], align="center")
         empty1  = _cell("", width=W[5])
@@ -246,17 +247,18 @@ def _tabla_cursos_pendientes(cursos_pendientes: list) -> str:
         semestres[sem].append(c)
 
     rows = ""
-    # Header global
-    titulo_global = f"<w:tc><w:tcPr><w:tcW w:w='{total_w}' w:type='dxa'/><w:gridSpan w:val='7'/><w:shd w:val='clear' w:color='auto' w:fill='1F3864'/></w:tcPr><w:p><w:pPr><w:jc w:val='center'/><w:spacing w:before='40' w:after='40'/></w:pPr><w:r><w:rPr><w:rFonts w:ascii='Arial Narrow' w:hAnsi='Arial Narrow' w:cs='Arial'/><w:b/><w:color w:val='FFFFFF'/><w:sz w:val='18'/><w:szCs w:val='18'/></w:rPr><w:t>PLAN DE ESTUDIOS PROGRAMA INGENIERÍA DE SOFTWARE Y COMPUTACIÓN</w:t></w:r></w:p></w:tc>"
-    rows += f"<w:tr>{titulo_global}</w:tr>"
-    subtitulo = f"<w:tc><w:tcPr><w:tcW w:w='{total_w}' w:type='dxa'/><w:gridSpan w:val='7'/><w:shd w:val='clear' w:color='auto' w:fill='1F3864'/></w:tcPr><w:p><w:pPr><w:jc w:val='center'/><w:spacing w:before='40' w:after='40'/></w:pPr><w:r><w:rPr><w:rFonts w:ascii='Arial Narrow' w:hAnsi='Arial Narrow' w:cs='Arial'/><w:b/><w:color w:val='FFFFFF'/><w:sz w:val='18'/><w:szCs w:val='18'/></w:rPr><w:t>Aprobado en el Consejo Académico de Diciembre de 2019</w:t></w:r></w:p></w:tc>"
-    rows += f"<w:tr>{subtitulo}</w:tr>"
+    if show_header:
+        titulo_global = f"<w:tc><w:tcPr><w:tcW w:w='{total_w}' w:type='dxa'/><w:gridSpan w:val='7'/><w:shd w:val='clear' w:color='auto' w:fill='1F3864'/></w:tcPr><w:p><w:pPr><w:jc w:val='center'/><w:spacing w:before='40' w:after='40'/></w:pPr><w:r><w:rPr><w:rFonts w:ascii='Arial Narrow' w:hAnsi='Arial Narrow' w:cs='Arial'/><w:b/><w:color w:val='FFFFFF'/><w:sz w:val='18'/><w:szCs w:val='18'/></w:rPr><w:t>PLAN DE ESTUDIOS PROGRAMA INGENIERÍA DE SOFTWARE Y COMPUTACIÓN</w:t></w:r></w:p></w:tc>"
+        rows += f"<w:tr>{titulo_global}</w:tr>"
+        subtitulo = f"<w:tc><w:tcPr><w:tcW w:w='{total_w}' w:type='dxa'/><w:gridSpan w:val='7'/><w:shd w:val='clear' w:color='auto' w:fill='1F3864'/></w:tcPr><w:p><w:pPr><w:jc w:val='center'/><w:spacing w:before='40' w:after='40'/></w:pPr><w:r><w:rPr><w:rFonts w:ascii='Arial Narrow' w:hAnsi='Arial Narrow' w:cs='Arial'/><w:b/><w:color w:val='FFFFFF'/><w:sz w:val='18'/><w:szCs w:val='18'/></w:rPr><w:t>Aprobado en el Consejo Académico de Diciembre de 2019</w:t></w:r></w:p></w:tc>"
+        rows += f"<w:tr>{subtitulo}</w:tr>"
 
     nombres_sem = {
-        1: "PRIMER SEMESTRE", 2: "SEGUNDO SEMESTRE", 3: "TERCERO SEMESTRE",
+        1: "PRIMER SEMESTRE", 2: "SEGUNDO SEMESTRE", 3: "TERCER SEMESTRE",
         4: "CUARTO SEMESTRE", 5: "QUINTO SEMESTRE", 6: "SEXTO SEMESTRE",
         7: "SÉPTIMO SEMESTRE", 8: "OCTAVO SEMESTRE", 9: "NOVENO SEMESTRE",
-        10: "DÉCIMO SEMESTRE",
+        10: "TRABAJO DE GRADO",
+        11: "REQUISITOS DE GRADO",
     }
 
     for sem_num in sorted(semestres.keys()):
@@ -437,8 +439,11 @@ def _build_document_xml(datos: dict) -> str:
     # ✅ CORRECCIÓN: Convertir objetos ORM a dicts ANTES de usarlos
     asigs_raw = n.get("asignaturas", [])
     asigs = [_obj_to_dict(a) for a in asigs_raw]
-    
-    cursos_pend = n.get("cursos_pendientes", [])
+
+    cursos_pend_all = n.get("cursos_pendientes", [])
+    # Separar cursos regulares (sem 1-10) de requisitos de grado (sem 11)
+    cursos_pend = [c for c in cursos_pend_all if c.get("semestre", 0) <= 10]
+    cursos_req = [c for c in cursos_pend_all if c.get("semestre", 0) >= 11]
     cursos_aut = n.get("cursos_autorizar", [])
     folios = n.get("folios", {})
 
@@ -513,14 +518,14 @@ def _build_document_xml(datos: dict) -> str:
     parts.append(p(
         "El suscrito Vicerrector Académico de la CORPORACIÓN UNIVERSITARIA AUTÓNOMA DEL CAUCA, "
         "en uso de sus atribuciones reglamentarias y en especial las conferidas en el Acuerdo 010 de 2005 "
-        "expedida por la ASAMBLEA DE FUNDADORES y el Reglamento Estudiantil Acuerdo 005 del 23 de julio de 2025. Artículo 57 y;"
+        "expedida por la ASAMBLEA DE FUNDADORES y el Reglamento Estudiantil Acuerdo 011 del 15 febrero de 2017. Artículo 32 y;"
     ))
     parts.append(p(""))
     parts.append(seccion("CONSIDERANDO"))
     parts.append(p(""))
 
     parts.append(p(
-        f"Que la Coordinación del Programa de Ingeniería de Software y Computación realizó el estudio de "
+        f"Que el Decano de la Facultad de Ingeniería y Ciencias Naturales, realizó el estudio de "
         f"homologación de los cursos aprobados en la ({INST_ORIG.upper()}), por el señor {NOMBRE}, "
         f"identificado con cédula de ciudadanía No. {CC} de {CIUDAD}.",
         indent=False
@@ -529,7 +534,7 @@ def _build_document_xml(datos: dict) -> str:
     parts.append(p(
         f"Que el Vicerrector Académico revisó los procedimientos aplicados y los anexos allegados por el señor "
         f"{NOMBRE} identificado con la Cédula No. {CC} de {CIUDAD}., para el estudio y análisis de la homologación "
-        f"realizada por la Coordinación del Programa de Ingeniería de Software y Computación, con el correspondiente "
+        f"realizada por el Decano de la Facultad de Ingeniería y Ciencias Naturales, con el correspondiente "
         f"pensum vigente del Programa de Ingeniería de Software y Computación aprobado mediante Resolución No. 15865 "
         f"del 18 de diciembre del 2019, y por lo anterior."
     ))
@@ -549,14 +554,6 @@ def _build_document_xml(datos: dict) -> str:
     parts.append(_tabla_homologadas(asigs, PROG_ORIG, INST_ORIG))
     parts.append(p(""))
 
-    # Parágrafo folios
-    parts.append(p("", bold_parts=[
-        ("Parágrafo 3. ", True),
-        ("Para realizar este estudio se analizaron los siguientes documentos, los cuales reposarán en la hoja de vida del aspirante/estudiante:", False),
-    ]))
-    parts.append(_tabla_folios(folios))
-    parts.append(p(""))
-
     # ── ARTÍCULO 2 ───────────────────────────────────────────────────────────
     parts.append(articulo("2°", [
         ("ARTICULO 2°. ", True),
@@ -567,11 +564,22 @@ def _build_document_xml(datos: dict) -> str:
         parts.append(_tabla_cursos_pendientes(cursos_pend))
     parts.append(p(""))
 
+    # Parágrafo 1: Requisitos de grado (tabla)
     parts.append(paragrafo(
         "1",
-        "Se debe presentar como requisito de grado los siguientes certificados: 96 Horas de Seminario de Actualización, "
-        "40 Horas de Curso de Extensión, Certificado de Actividad Deportivo Formativo y Suficiencia Internacional en Inglés."
+        "Se debe presentar como requisito de grado los siguientes certificados:"
     ))
+    parts.append(p(""))
+    if cursos_req:
+        parts.append(_tabla_cursos_pendientes(cursos_req, show_header=False))
+    parts.append(p(""))
+
+    # Parágrafo 2: Documentos analizados (folios)
+    parts.append(p("", bold_parts=[
+        ("Parágrafo 2. ", True),
+        ("Para realizar este estudio se analizaron los siguientes documentos, los cuales reposarán en la hoja de vida del aspirante/estudiante:", False),
+    ]))
+    parts.append(_tabla_folios(folios))
     parts.append(p(""))
 
     # ── ARTÍCULO 3 ───────────────────────────────────────────────────────────
@@ -627,7 +635,7 @@ def _build_document_xml(datos: dict) -> str:
     parts.append(p(f"Fecha de notificación: {FECHA_NOT}"))
     parts.append(p(""))
     parts.append(p("", bold_parts=[("Copia: ", False), ("\t\tVicerrectoría Académica", False)]))
-    parts.append(p("\t\tOficina de Mercadeo y Admisiones"))
+    parts.append(p("\t\tOficina de Control y Registro (Hoja de Vida estudiante)"))
     parts.append(p("\t\tGestión Documental"))
     if TRANSCRIPTOR:
         parts.append(p("", bold_parts=[("Transcriptor:\t\t", False), (TRANSCRIPTOR, False)]))
@@ -661,12 +669,11 @@ def _build_document_xml(datos: dict) -> str:
 </w:document>'''
 
 
-def generar_resolucion_docx(homologacion, solicitud) -> str:
+def generar_resolucion_docx(homologacion, solicitud, asignaturas_destino=None) -> str:
     """
     Punto de entrada principal. Recibe los modelos ORM y genera el .docx.
+    asignaturas_destino: lista de Asignatura del programa destino (para cursos pendientes).
     Retorna la ruta al archivo generado.
-    
-    CORREGIDO: Usa zipfile en lugar de subprocess para empaquetar/desempaquetar.
     """
     import tempfile
     import shutil
@@ -679,7 +686,6 @@ def generar_resolucion_docx(homologacion, solicitud) -> str:
         # 1. Copiar y desempacar la plantilla oficial
         plantilla_src = PLANTILLA_PATH
         if not os.path.exists(plantilla_src):
-            # Fallback: buscar en ubicaciones alternativas
             for alt in [
                 "templates/resolucion_plantilla.docx",
                 "/app/templates/resolucion_plantilla.docx",
@@ -690,18 +696,68 @@ def generar_resolucion_docx(homologacion, solicitud) -> str:
 
         plantilla_copia = os.path.join(tmpdir, "plantilla.docx")
         shutil.copy2(plantilla_src, plantilla_copia)
-        
-        # ✅ CORRECCIÓN: Usar zipfile en lugar de subprocess
         _unpack_docx(plantilla_copia, unpacked_dir)
 
         # 2. Construir datos para el documento
         estudiante = solicitud.estudiante
         nombre_completo = f"{estudiante.nombre} {estudiante.apellido}".upper()
 
-        # Fecha actual formateada
         hoy = datetime.now()
         fecha_str = f"{hoy.day} {MESES_ES[hoy.month]}. {hoy.year}"
         fecha_not = f"{hoy.day:02d}/{hoy.month:02d}/{hoy.year}"
+
+        # Calcular cursos pendientes: asignaturas del programa destino que NO fueron homologadas
+        cursos_pendientes = []
+        cursos_autorizar = []
+        if asignaturas_destino:
+            nombres_homologados = {
+                (a.asignatura_destino or "").strip().lower()
+                for a in homologacion.asignaturas
+                if a.estado.value == "homologada" and a.asignatura_destino
+            }
+            codigos_homologados = {
+                (a.codigo_destino or "").strip()
+                for a in homologacion.asignaturas
+                if a.estado.value == "homologada" and a.codigo_destino
+            }
+            pendientes_ordenados = sorted(
+                asignaturas_destino,
+                key=lambda x: (x.semestre or 99, x.nombre)
+            )
+            for asig in pendientes_ordenados:
+                nombre_norm = asig.nombre.strip().lower()
+                codigo_norm = (asig.codigo or "").strip()
+                ya_homologada = (
+                    nombre_norm in nombres_homologados
+                    or (codigo_norm and codigo_norm in codigos_homologados)
+                )
+                if not ya_homologada:
+                    cursos_pendientes.append({
+                        "codigo": asig.codigo or "",
+                        "nombre": asig.nombre,
+                        "creditos": asig.creditos,
+                        "tiempo_presencial": asig.intensidad_horaria or asig.creditos,
+                        "tipo": asig.tipo or "",
+                        "linea_continuidad": asig.linea_continuidad or "",
+                        "semestre": asig.semestre or 0,
+                    })
+
+            # cursos_autorizar: asignaturas regulares pendientes (sem 1-9) del semestre más bajo
+            cursos_regulares = [c for c in cursos_pendientes if 0 < c["semestre"] <= 9]
+            if cursos_regulares:
+                sem_min = min(c["semestre"] for c in cursos_regulares)
+                cursos_autorizar = [
+                    {
+                        "codigo": c["codigo"],
+                        "nombre": c["nombre"],
+                        "creditos": c["creditos"],
+                        "ih": c["tiempo_presencial"],
+                        "tipo": c["tipo"],
+                        "linea": c["linea_continuidad"],
+                        "semestre": c["semestre"],
+                    }
+                    for c in cursos_regulares if c["semestre"] == sem_min
+                ]
 
         datos = {
             "numero_resolucion": solicitud.numero_resolucion or "____",
@@ -716,8 +772,8 @@ def generar_resolucion_docx(homologacion, solicitud) -> str:
             "programa_destino": solicitud.programa_destino or "",
             "institucion_destino": solicitud.institucion_destino or "",
             "asignaturas": homologacion.asignaturas,
-            "cursos_pendientes": [],   # Se calcula abajo si hay datos
-            "cursos_autorizar": [],    # Se calcula abajo si hay datos
+            "cursos_pendientes": cursos_pendientes,
+            "cursos_autorizar": cursos_autorizar,
             "periodo_autorizacion": f"segundo período académico del {hoy.year}",
             "folios": {"solicitud": 1, "aprobacion": 0, "calificaciones": 2, "contenido": 35, "conducta": 0},
             "vicerrector": "SEBASTIÁN TORO VÉLEZ",

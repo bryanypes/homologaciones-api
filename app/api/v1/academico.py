@@ -41,7 +41,7 @@ async def listar_instituciones(
 async def crear_institucion(
     data: InstitucionCreate,
     db: AsyncSession = Depends(get_db),
-    _=Depends(require_rol(Rol.COORDINADOR, Rol.RECTOR)),
+    _=Depends(require_rol(Rol.ADMIN)),
 ):
     institucion = Institucion(**data.model_dump())
     db.add(institucion)
@@ -96,7 +96,7 @@ async def listar_facultades(
 async def crear_facultad(
     data: FacultadCreate,
     db: AsyncSession = Depends(get_db),
-    _=Depends(require_rol(Rol.COORDINADOR, Rol.RECTOR)),
+    _=Depends(require_rol(Rol.ADMIN)),
 ):
     facultad = Facultad(**data.model_dump())
     db.add(facultad)
@@ -134,7 +134,7 @@ async def listar_programas(
 async def crear_programa(
     data: ProgramaCreate,
     db: AsyncSession = Depends(get_db),
-    _=Depends(require_rol(Rol.COORDINADOR, Rol.RECTOR)),
+    _=Depends(require_rol(Rol.ADMIN)),
 ):
     programa = Programa(**data.model_dump())
     db.add(programa)
@@ -172,7 +172,7 @@ async def listar_asignaturas(
 async def crear_asignatura(
     data: AsignaturaCreate,
     db: AsyncSession = Depends(get_db),
-    _=Depends(require_rol(Rol.COORDINADOR, Rol.RECTOR)),
+    _=Depends(require_rol(Rol.ADMIN)),
 ):
     asignatura = Asignatura(**data.model_dump())
     db.add(asignatura)

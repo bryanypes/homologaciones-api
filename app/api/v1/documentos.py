@@ -321,7 +321,7 @@ async def subir_resolucion(
     solicitud_id: UUID,
     file: UploadFile = File(..., description="Resolución en PDF o Word (.docx)"),
     db: AsyncSession = Depends(get_db),
-    usuario: Usuario = Depends(require_rol(Rol.COORDINADOR, Rol.RECTOR)),
+    usuario: Usuario = Depends(require_rol(Rol.COORDINADOR, Rol.VICERRECTOR)),
 ):
     _validar_pdf_o_docx(file)
     solicitud = await _obtener_solicitud(solicitud_id, db)
@@ -337,7 +337,7 @@ async def subir_resolucion(
             status_code=400,
             detail="El coordinador solo puede subir la resolución en estados REVISION_COORDINADOR o APROBADA",
         )
-    if rol == Rol.RECTOR and estado not in estados_rector:
+    if rol == Rol.VICERRECTOR and estado not in estados_rector:
         raise HTTPException(
             status_code=400,
             detail="El rector solo puede subir la resolución en estados PENDIENTE_RECTOR o APROBADA",

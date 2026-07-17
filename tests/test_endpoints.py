@@ -26,7 +26,7 @@ async def _registrar_estudiante(client: AsyncClient, email: str) -> str:
 
 async def _login_rector(client: AsyncClient) -> str:
     r = await client.post("/api/v1/auth/login", json={
-        "email": "rector@universidad.edu.co", "password": "Rector2024!"
+        "email": "vicerrector@universidad.edu.co", "password": "Rector2024!"
     })
     assert r.status_code == 200, "El seed del rector no corrió"
     return r.json()["access_token"]
@@ -134,10 +134,17 @@ class TestAuth:
         })
         assert r.status_code == 400
 
-    async def test_register_rector_bloqueado(self, client: AsyncClient):
+    async def test_register_vicerrector_bloqueado(self, client: AsyncClient):
         r = await client.post("/api/v1/auth/register", json={
             "nombre": "X", "apellido": "Y", "email": f"r_{uuid4().hex[:6]}@test.com",
-            "password": "123456", "rol": "rector"
+            "password": "123456", "rol": "vicerrector"
+        })
+        assert r.status_code == 400
+
+    async def test_register_admin_bloqueado(self, client: AsyncClient):
+        r = await client.post("/api/v1/auth/register", json={
+            "nombre": "X", "apellido": "Y", "email": f"a_{uuid4().hex[:6]}@test.com",
+            "password": "123456", "rol": "admin"
         })
         assert r.status_code == 400
 

@@ -6,16 +6,43 @@ from app.models.homologacion import EstadoAsignatura
 
 
 class ActualizarAsignaturaRequest(BaseModel):
-    estado: EstadoAsignatura
+    estado: Optional[EstadoAsignatura] = None
     justificacion: Optional[str] = None
+    asignatura_destino: Optional[str] = None
+    creditos_destino: Optional[float] = None
+    codigo_destino: Optional[str] = None
+    semestre_destino: Optional[int] = None
+    intensidad_horaria_destino: Optional[int] = None
+    tipo_destino: Optional[str] = None
+    calificacion_origen: Optional[float] = None
+
+
+class AgregarAsignaturaRequest(BaseModel):
+    asignatura_origen: str
+    creditos_origen: Optional[float] = None
+    calificacion_origen: Optional[float] = None
+    asignatura_destino: Optional[str] = None
+    codigo_destino: Optional[str] = None
+    semestre_destino: Optional[int] = None
+    creditos_destino: Optional[float] = None
+    intensidad_horaria_destino: Optional[int] = None
+    tipo_destino: Optional[str] = None
+    estado: EstadoAsignatura = EstadoAsignatura.HOMOLOGADA
+    justificacion: Optional[str] = None
+    similitud_porcentaje: Optional[float] = None
 
 
 class HomologacionAsignaturaResponse(BaseModel):
     id: uuid.UUID
     asignatura_origen: str
     creditos_origen: Optional[float]
+    calificacion_origen: Optional[float] = None
     asignatura_destino: Optional[str]
+    codigo_destino: Optional[str] = None
+    semestre_destino: Optional[int] = None
     creditos_destino: Optional[float]
+    intensidad_horaria_destino: Optional[int] = None
+    tipo_destino: Optional[str] = None
     estado: EstadoAsignatura
     estado_ia_original: Optional[EstadoAsignatura] = None
     fue_corregida: bool = False

@@ -17,7 +17,7 @@ ESTADO_LABELS = {
     "enviada": "Enviada — en espera de revisión",
     "en_revision": "En revisión por coordinador",
     "procesando_ia": "Procesando con inteligencia artificial",
-    "pendiente_rector": "Pendiente de aprobación por rectoría",
+    "pendiente_rector": "Pendiente de aprobación por vicerrectoría",
     "aprobada": "Aprobada ✓",
     "rechazada": "Rechazada",
 }
@@ -107,8 +107,8 @@ def _html_homologacion_completada(
       <div class="body">
         <p>Estimado/a <strong>{nombre_estudiante}</strong>,</p>
         <p>El análisis de inteligencia artificial de su solicitud ha finalizado exitosamente.</p>
-        <span class="estado-badge">Pendiente de aprobación por rectoría</span>
-        <p>El resultado ha sido enviado al rector para su revisión y aprobación final.
+        <span class="estado-badge">Pendiente de aprobación por vicerrectoría</span>
+        <p>El resultado ha sido enviado al vicerrector académico para su revisión y aprobación final.
            Le notificaremos cuando haya una decisión.</p>
         <p><strong>ID de solicitud:</strong> <code>{solicitud_id}</code></p>
       </div>
@@ -272,10 +272,61 @@ async def notificar_homologacion_completada(
     texto = (
         f"Estimado/a {nombre_estudiante},\n\n"
         f"El análisis de su solicitud (ID: {solicitud_id}) ha finalizado. "
-        "Está pendiente de aprobación por rectoría.\n\n"
+        "Está pendiente de aprobación por vicerrectoría.\n\n"
         "Sistema de Homologaciones — Universidad del Cauca"
     )
     await _enviar(email_estudiante, asunto, html, texto)
+
+
+async def notificar_mercadeo_homologacion_aprobada(
+    nombre_estudiante: str,
+    solicitud_id: str,
+    numero_resolucion: str,
+    programa_destino: str,
+    institucion_origen: str,
+) -> None:
+    """
+    Notifica al área de mercadeo que una homologación fue aprobada.
+    El destinatario se configura con la variable MERCADEO_EMAIL.
+    """
+    destinatario = settings.MERCADEO_EMAIL
+    if not destinatario:
+        logger.info("[Email] MERCADEO_EMAIL no configurado. Saltando notificación a mercadeo.")
+        return
+
+    asunto = f"[Homologaciones] Aprobada — Resolución {numero_resolucion}"
+    html = f"""
+    <!DOCTYPE html><html><head><meta charset="utf-8">
+    <style>{_BASE_STYLE}</style></head><body>
+    <div class="container">
+      <div class="header">
+        <h1>Sistema de Homologaciones — Universidad del Cauca</h1>
+      </div>
+      <div class="body">
+        <p>Se ha aprobado una solicitud de homologación. Por favor tome nota de los datos para el proceso de matrícula:</p>
+        <p><strong>Estudiante:</strong> {nombre_estudiante}</p>
+        <p><strong>Programa destino:</strong> {programa_destino}</p>
+        <p><strong>Institución de origen:</strong> {institucion_origen}</p>
+        <span class="estado-badge" style="background:#d4edda;color:#155724;">Resolución {numero_resolucion} — APROBADA</span>
+        <p><strong>ID de solicitud:</strong> <code>{solicitud_id}</code></p>
+        <p>El estudiante puede iniciar su proceso de matrícula.</p>
+      </div>
+      <div class="footer">
+        Este es un mensaje automático del Sistema de Homologaciones.
+      </div>
+    </div>
+    </body></html>
+    """
+    texto = (
+        f"Homologación aprobada — Resolución {numero_resolucion}\n\n"
+        f"Estudiante: {nombre_estudiante}\n"
+        f"Programa destino: {programa_destino}\n"
+        f"Institución de origen: {institucion_origen}\n"
+        f"ID solicitud: {solicitud_id}\n\n"
+        "El estudiante puede iniciar su proceso de matrícula.\n\n"
+        "Sistema de Homologaciones — Universidad del Cauca"
+    )
+    await _enviar(destinatario, asunto, html, texto)
 
 
 async def enviar_recuperacion_contraseña(

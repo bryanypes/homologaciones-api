@@ -48,5 +48,8 @@ class Settings(BaseSettings):
     R2_SECRET_ACCESS_KEY: Optional[str] = None
     R2_BUCKET_NAME: Optional[str] = None
 
+    # Email de mercadeo (notificación cuando una homologación es aprobada)
+    MERCADEO_EMAIL: Optional[str] = None
+
 
 settings = Settings()
