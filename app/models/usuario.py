@@ -18,6 +18,8 @@ class Usuario(Base):
     nombre: Mapped[str] = mapped_column(String(100), nullable=False)
     apellido: Mapped[str] = mapped_column(String(100), nullable=False)
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    cedula: Mapped[str] = mapped_column(String(20), unique=True, nullable=True, index=True)
+    telefono: Mapped[str] = mapped_column(String(20), nullable=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     rol: Mapped[Rol] = mapped_column(SAEnum(Rol, name='rol', create_type=False, values_callable=lambda e: [m.value for m in e]), nullable=False, default=Rol.ESTUDIANTE)
     activo: Mapped[bool] = mapped_column(Boolean, default=True)

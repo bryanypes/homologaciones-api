@@ -149,11 +149,12 @@ async def crear_programa(
     "/asignaturas",
     response_model=list[AsignaturaResponse],
     summary="Listar asignaturas",
+    description="Pensum privado. Solo coordinadores, vicerrector y admin.",
 )
 async def listar_asignaturas(
     programa_id: UUID = Query(None, description="Filtrar por programa"),
     db: AsyncSession = Depends(get_db),
-    _=Depends(get_current_user),
+    _=Depends(require_rol(Rol.COORDINADOR, Rol.VICERRECTOR, Rol.ADMIN)),
 ):
     query = select(Asignatura).order_by(Asignatura.nombre)
     if programa_id:

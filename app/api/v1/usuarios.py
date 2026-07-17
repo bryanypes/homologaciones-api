@@ -113,10 +113,17 @@ async def crear_usuario(
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Email ya registrado")
 
+    if data.cedula:
+        dup = await db.execute(select(Usuario).where(Usuario.cedula == data.cedula))
+        if dup.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="Ya existe un usuario con esa cédula")
+
     usuario = Usuario(
         nombre=data.nombre,
         apellido=data.apellido,
         email=data.email,
+        cedula=data.cedula or None,
+        telefono=data.telefono or None,
         password_hash=hash_password(data.password),
         rol=data.rol,
     )
@@ -166,6 +173,15 @@ async def editar_mi_perfil(
         usuario.nombre = data.nombre
     if data.apellido is not None:
         usuario.apellido = data.apellido
+    if data.telefono is not None:
+        usuario.telefono = data.telefono
+    if data.cedula is not None:
+        dup = await db.execute(
+            select(Usuario).where(Usuario.cedula == data.cedula, Usuario.id != usuario.id)
+        )
+        if dup.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="Ya existe un usuario registrado con esa cédula")
+        usuario.cedula = data.cedula
 
     await db.commit()
     await db.refresh(usuario)
@@ -197,6 +213,15 @@ async def actualizar_usuario(
         usuario.nombre = data.nombre
     if data.apellido is not None:
         usuario.apellido = data.apellido
+    if data.telefono is not None:
+        usuario.telefono = data.telefono
+    if data.cedula is not None:
+        dup = await db.execute(
+            select(Usuario).where(Usuario.cedula == data.cedula, Usuario.id != usuario_id)
+        )
+        if dup.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="Ya existe un usuario con esa cédula")
+        usuario.cedula = data.cedula
     if data.password is not None:
         usuario.password_hash = hash_password(data.password)
     if data.rol is not None:

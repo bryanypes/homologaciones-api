@@ -39,10 +39,17 @@ async def register(data: UsuarioCreate, db: AsyncSession = Depends(get_db)):
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Email ya registrado")
 
+    if data.cedula:
+        dup = await db.execute(select(Usuario).where(Usuario.cedula == data.cedula))
+        if dup.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="Ya existe un usuario registrado con esa cédula")
+
     usuario = Usuario(
         nombre=data.nombre,
         apellido=data.apellido,
         email=data.email,
+        cedula=data.cedula or None,
+        telefono=data.telefono or None,
         password_hash=hash_password(data.password),
         rol=Rol.ESTUDIANTE,
     )
