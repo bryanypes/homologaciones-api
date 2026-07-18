@@ -1,34 +1,25 @@
 """
-doc_service.py — Generación de Resolución de Homologación (CORREGIDA)
+doc_service.py — Generación de Resolución de Homologación con docxtpl
 
-Estrategia: en lugar de construir el documento desde cero, tomamos la plantilla
-oficial (proyeccion_RES_HOMOLOGACIÓN...) como base, desempaquetamos su XML,
-reemplazamos los datos del estudiante/asignaturas, y volvemos a empaquetar.
-
-CORRECCIÓN: Usa zipfile nativo en lugar de subprocess para empaquetar/desempaquetar.
-Esto elimina la dependencia de scripts externos que no existen en Windows.
+Usa la plantilla templates/plantilla_resolucion_matricula.docx (Jinja2).
 """
 
 import os
-import re
-import shutil
-import zipfile
-import tempfile
-import uuid
 import logging
 from datetime import datetime
-from typing import Optional
-import sys
+
+from docxtpl import DocxTemplate
 
 logger = logging.getLogger(__name__)
 
-# Ruta a la plantilla oficial empacada — debe estar en el repo bajo templates/
-PLANTILLA_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "templates", "resolucion_plantilla.docx")
+PLANTILLA_PATH = os.path.normpath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "templates", "plantilla_resolucion_matricula.docx")
+)
 
 MESES_ES = {
-    1: "ENERO", 2: "FEBRERO", 3: "MARZO", 4: "ABRIL",
-    5: "MAYO", 6: "JUNIO", 7: "JULIO", 8: "AGOSTO",
-    9: "SEPTIEMBRE", 10: "OCTUBRE", 11: "NOVIEMBRE", 12: "DICIEMBRE",
+    1: "enero", 2: "febrero", 3: "marzo", 4: "abril",
+    5: "mayo", 6: "junio", 7: "julio", 8: "agosto",
+    9: "septiembre", 10: "octubre", 11: "noviembre", 12: "diciembre",
 }
 
 SEMESTRE_ROMANO = {
@@ -36,774 +27,172 @@ SEMESTRE_ROMANO = {
     6: "VI", 7: "VII", 8: "VIII", 9: "IX", 10: "X",
 }
 
-
-def _unpack_docx(docx_path: str, output_dir: str) -> None:
-    """Desempaqueta un DOCX (ZIP) a un directorio."""
-    os.makedirs(output_dir, exist_ok=True)
-    with zipfile.ZipFile(docx_path, 'r') as z:
-        z.extractall(output_dir)
-
-
-def _pack_docx(unpacked_dir: str, output_docx: str) -> None:
-    """Empaqueta un directorio desempaquetado de vuelta a DOCX (ZIP)."""
-    os.makedirs(os.path.dirname(output_docx), exist_ok=True)
-    with zipfile.ZipFile(output_docx, 'w', zipfile.ZIP_DEFLATED) as z:
-        for root, dirs, files in os.walk(unpacked_dir):
-            for file in files:
-                file_path = os.path.join(root, file)
-                arcname = os.path.relpath(file_path, unpacked_dir)
-                z.write(file_path, arcname)
-
-
-def _esc(text: str) -> str:
-    """Escapa caracteres especiales XML."""
-    return (str(text)
-            .replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-            .replace('"', "&quot;"))
+DOCUMENTOS_FOLIOS = [
+    {"nombre": "Formato de solicitud del aspirante/estudiante.", "folios": 1},
+    {
+        "nombre": "Documento de aprobación legal del programa en la Institución de procedencia.",
+        "folios": 0,
+    },
+    {
+        "nombre": (
+            "Certificado oficial de calificaciones, en el cual deben figurar todas las asignaturas "
+            "cursadas por estudiantes, la intensidad horaria total, los créditos y la calificación "
+            "de cada una de ellas."
+        ),
+        "folios": 2,
+    },
+    {
+        "nombre": "Documento debidamente refrendado en donde conste el contenido programático de las asignaturas aprobadas.",
+        "folios": 35,
+    },
+    {
+        "nombre": "Certificado oficial de buena conducta, expedido por la institución de procedencia.",
+        "folios": 0,
+    },
+]
 
 
-def _run(tag: str, text: str, bold: bool = False, color: str = "", size: int = 0,
-         font: str = "Arial Narrow") -> str:
-    """Genera un <w:r> con su texto."""
-    rpr_parts = [f'<w:rFonts w:ascii="{font}" w:hAnsi="{font}" w:cs="Arial"/>']
-    if bold:
-        rpr_parts.append("<w:b/>")
-    if color:
-        rpr_parts.append(f'<w:color w:val="{color}"/>')
-    if size:
-        rpr_parts.append(f'<w:sz w:val="{size}"/><w:szCs w:val="{size}"/>')
-    rpr = "<w:rPr>" + "".join(rpr_parts) + "</w:rPr>"
-    space = ' xml:space="preserve"' if " " in text else ""
-    return f"<w:r>{rpr}<w:t{space}>{_esc(text)}</w:t></w:r>"
+def _sem_romano(n) -> str:
+    try:
+        return SEMESTRE_ROMANO.get(int(n), str(n))
+    except (TypeError, ValueError):
+        return str(n) if n else ""
 
 
-def _par(content: str, style: str = "Normal", spacing_before: int = 0,
-         spacing_after: int = 100, align: str = "") -> str:
-    """Genera un <w:p> completo."""
-    ppr_parts = [f'<w:pStyle w:val="{style}"/>']
-    if spacing_before or spacing_after != 100:
-        ppr_parts.append(f'<w:spacing w:before="{spacing_before}" w:after="{spacing_after}"/>')
-    if align:
-        ppr_parts.append(f'<w:jc w:val="{align}"/>')
-    ppr = "<w:pPr>" + "".join(ppr_parts) + "</w:pPr>"
-    return f"<w:p>{ppr}{content}</w:p>"
+def _safe_int(val) -> int:
+    try:
+        return int(val or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
-def _cell(text: str, bold: bool = False, bgcolor: str = "", width: int = 0,
-          color_txt: str = "", align: str = "", size: int = 18) -> str:
-    """Genera una celda de tabla."""
-    rpr = f'<w:rFonts w:ascii="Arial Narrow" w:hAnsi="Arial Narrow" w:cs="Arial"/>'
-    if bold:
-        rpr += "<w:b/>"
-    if color_txt:
-        rpr += f'<w:color w:val="{color_txt}"/>'
-    rpr += f'<w:sz w:val="{size}"/><w:szCs w:val="{size}"/>'
-
-    jc = f'<w:jc w:val="{align}"/>' if align else ""
-    ppr = f'<w:pPr><w:spacing w:before="40" w:after="40"/>{jc}</w:pPr>'
-    space = ' xml:space="preserve"' if " " in str(text) or not str(text) else ""
-    cell_content = f'{ppr}<w:r><w:rPr>{rpr}</w:rPr><w:t{space}>{_esc(str(text))}</w:t></w:r>'
-
-    shading = f'<w:shd w:val="clear" w:color="auto" w:fill="{bgcolor}"/>' if bgcolor else ""
-    borders = """<w:tcBorders>
-      <w:top w:val="single" w:sz="4" w:space="0" w:color="000000"/>
-      <w:left w:val="single" w:sz="4" w:space="0" w:color="000000"/>
-      <w:bottom w:val="single" w:sz="4" w:space="0" w:color="000000"/>
-      <w:right w:val="single" w:sz="4" w:space="0" w:color="000000"/>
-    </w:tcBorders>"""
-    width_attr = f'<w:tcW w:w="{width}" w:type="dxa"/>' if width else ""
-    margins = '<w:tcMar><w:top w:w="80" w:type="dxa"/><w:left w:w="108" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:right w:w="108" w:type="dxa"/></w:tcMar>'
-    tcp = f"<w:tcPr>{width_attr}{borders}{shading}{margins}</w:tcPr>"
-    return f"<w:tc>{tcp}<w:p>{cell_content}</w:p></w:tc>"
-
-
-def _tabla_homologadas(asignaturas: list, prog_origen: str, inst_origen: str) -> str:
-    """
-    Tabla principal: CURSOS ACADÉMICOS HOMOLOGADOS
-    Columnas: Curso origen | Código | Curso Autónoma | Semestre | Créditos | IH | TP | Calificación
-    """
-    # Anchos en DXA para 9360 total (A4 con márgenes)
-    W = [2200, 1000, 1600, 600, 700, 500, 500, 660]
-    total_w = sum(W)
-    col_widths = " ".join(str(w) for w in W)
-
-    def header_row() -> str:
-        headers = [
-            ("CURSO INSTITUCIÓN DE ORIGEN", W[0]),
-            ("CÓDIGO CURSO UNIAUTONOMA",    W[1]),
-            ("CURSO ACADÉMICO AUTÓNOMA",    W[2]),
-            ("SEMESTRE",                    W[3]),
-            ("CRÉDITOS",                    W[4]),
-            ("IH",                          W[5]),
-            ("TP",                          W[6]),
-            ("Calif",                       W[7]),
-        ]
-        cells = "".join(_cell(h, bold=True, bgcolor="1F3864", color_txt="FFFFFF", width=w, align="center") for h, w in headers)
-        return f"<w:tr>{cells}</w:tr>"
-
-    def meta_rows() -> str:
-        def merge_row(label: str, value: str) -> str:
-            c1 = _cell(label, bold=True, bgcolor="1F3864", color_txt="FFFFFF", width=W[0])
-            # merge 7 columnas para el valor
-            span = f"<w:tcPr><w:tcW w:w='{sum(W[1:])}' w:type='dxa'/><w:gridSpan w:val='7'/></w:tcPr>"
-            p = f"<w:p><w:pPr><w:spacing w:before='40' w:after='40'/></w:pPr><w:r><w:rPr><w:rFonts w:ascii='Arial Narrow' w:hAnsi='Arial Narrow' w:cs='Arial'/><w:b/><w:color w:val='FFFFFF'/><w:sz w:val='18'/><w:szCs w:val='18'/></w:rPr><w:t xml:space='preserve'>{_esc(value)}</w:t></w:r></w:p>"
-            c2 = f"<w:tc>{span}{p}</w:tc>"
-            return f"<w:tr>{c1}{c2}</w:tr>"
-
-        r1 = merge_row("PROGRAMA DE ORIGEN:", prog_origen.upper())
-        r2 = merge_row("INSTITUCIÓN DE ORIGEN:", inst_origen.upper())
-        r3_cells = f"""<w:tc><w:tcPr><w:tcW w:w='{total_w}' w:type='dxa'/><w:gridSpan w:val='8'/><w:shd w:val='clear' w:color='auto' w:fill='1F3864'/></w:tcPr>
-          <w:p><w:pPr><w:jc w:val='center'/><w:spacing w:before='40' w:after='40'/></w:pPr>
-          <w:r><w:rPr><w:rFonts w:ascii='Arial Narrow' w:hAnsi='Arial Narrow' w:cs='Arial'/><w:b/><w:color w:val='FFFFFF'/><w:sz w:val='18'/><w:szCs w:val='18'/></w:rPr><w:t>CURSOS ACADÉMICOS HOMOLOGADOS</w:t></w:r></w:p></w:tc>"""
-        r3 = f"<w:tr>{r3_cells}</w:tr>"
-        return r3 + r1 + r2
-
-    def data_rows() -> str:
-        rows = ""
-        fill = "F2F2F2"
-        for i, a in enumerate(asignaturas):
-            bg = "" if i % 2 == 0 else fill
-            sem = SEMESTRE_ROMANO.get(a.get("semestre_destino", 0), str(a.get("semestre_destino", "")))
-            calif = str(a.get("calificacion_origen", "")).replace(".", ",") if a.get("calificacion_origen") else ""
-            cells = (
-                _cell(a.get("asignatura_origen", ""), width=W[0], bgcolor=bg) +
-                _cell(str(a.get("codigo_destino", "")), width=W[1], bgcolor=bg, align="center") +
-                _cell(a.get("asignatura_destino", ""), width=W[2], bgcolor=bg) +
-                _cell(sem, width=W[3], bgcolor=bg, align="center") +
-                _cell(str(a.get("creditos_destino", "")), width=W[4], bgcolor=bg, align="center") +
-                _cell(str(a.get("intensidad_horaria_destino", "") or ""), width=W[5], bgcolor=bg, align="center") +
-                _cell(a.get("tipo_destino", "") or "", width=W[6], bgcolor=bg, align="center") +
-                _cell(calif, width=W[7], bgcolor=bg, align="center")
-            )
-            rows += f"<w:tr>{cells}</w:tr>"
-        return rows
-
-    def totals_row() -> str:
-        total_cr = sum(a.get("creditos_destino", 0) or 0 for a in asignaturas)
-        total_n = len(asignaturas)
-
-        def span_cell(label: str, val, span: int, w_total: int) -> str:
-            p = f"<w:p><w:pPr><w:spacing w:before='40' w:after='40'/></w:pPr><w:r><w:rPr><w:rFonts w:ascii='Arial Narrow' w:hAnsi='Arial Narrow' w:cs='Arial'/><w:b/><w:sz w:val='18'/><w:szCs w:val='18'/></w:rPr><w:t xml:space='preserve'>{_esc(label)}</w:t></w:r><w:r><w:rPr><w:rFonts w:ascii='Arial Narrow' w:hAnsi='Arial Narrow' w:cs='Arial'/><w:b/><w:sz w:val='18'/><w:szCs w:val='18'/></w:rPr><w:t xml:space='preserve'> {val}</w:t></w:r></w:p>"
-            return f"<w:tc><w:tcPr><w:tcW w:w='{w_total}' w:type='dxa'/><w:gridSpan w:val='{span}'/></w:tcPr>{p}</w:tc>"
-
-        c1 = span_cell("TOTAL, CURSOS HOMOLOGADOS:", total_n, 4, sum(W[:4]))
-        c2 = span_cell("TOTAL, CRÉDITOS HOMOLOGADOS:", total_cr, 4, sum(W[4:]))
-        return f"<w:tr>{c1}{c2}</w:tr>"
-
-    table = f"""<w:tbl>
-      <w:tblPr>
-        <w:tblStyle w:val="Tablaconestilo1"/>
-        <w:tblW w:w="{total_w}" w:type="dxa"/>
-        <w:tblBorders>
-          <w:insideH w:val="single" w:sz="4" w:space="0" w:color="000000"/>
-          <w:insideV w:val="single" w:sz="4" w:space="0" w:color="000000"/>
-        </w:tblBorders>
-        <w:tblLook w:val="04A0"/>
-      </w:tblPr>
-      <w:tblGrid>{" ".join(f'<w:gridCol w:w="{w}"/>' for w in W)}</w:tblGrid>
-      {meta_rows()}
-      {header_row()}
-      {data_rows()}
-      {totals_row()}
-    </w:tbl>"""
-    return table
-
-
-def _tabla_cursos_pendientes(cursos_pendientes: list, show_header: bool = True) -> str:
-    """
-    Tabla ARTÍCULO 2: Plan de estudios con cursos pendientes agrupados por semestre.
-    show_header=False omite el título global (usado para la tabla de Requisitos de Grado).
-    """
-    W = [500, 1000, 4500, 600, 600, 600, 1560]
-    total_w = sum(W)
-
-    def titulo_semestre(nombre: str) -> str:
-        cells = "".join([
-            _cell("No.", bold=True, bgcolor="1F3864", color_txt="FFFFFF", width=W[0], align="center"),
-            _cell("Códigos", bold=True, bgcolor="1F3864", color_txt="FFFFFF", width=W[1], align="center"),
-            _cell(nombre, bold=True, bgcolor="1F3864", color_txt="FFFFFF", width=W[2]),
-            _cell("CR", bold=True, bgcolor="1F3864", color_txt="FFFFFF", width=W[3], align="center"),
-            _cell("TP", bold=True, bgcolor="1F3864", color_txt="FFFFFF", width=W[4], align="center"),
-            _cell("Tipo", bold=True, bgcolor="1F3864", color_txt="FFFFFF", width=W[5], align="center"),
-            _cell("Línea de continuidad", bold=True, bgcolor="1F3864", color_txt="FFFFFF", width=W[6]),
-        ])
-        return f"<w:tr>{cells}</w:tr>"
-
-    def total_row(cr: int, tp: int) -> str:
-        label_cell = f"<w:tc><w:tcPr><w:tcW w:w='{sum(W[:3])}' w:type='dxa'/><w:gridSpan w:val='3'/></w:tcPr><w:p><w:pPr><w:spacing w:before='40' w:after='40'/></w:pPr><w:r><w:rPr><w:rFonts w:ascii='Arial Narrow' w:hAnsi='Arial Narrow' w:cs='Arial'/><w:b/><w:sz w:val='18'/><w:szCs w:val='18'/></w:rPr><w:t>Total de Créditos</w:t></w:r></w:p></w:tc>"
-        cr_cell = _cell(str(cr), bold=True, width=W[3], align="center")
-        tp_cell = _cell(str(tp), bold=True, width=W[4], align="center")
-        empty1  = _cell("", width=W[5])
-        empty2  = _cell("", width=W[6])
-        return f"<w:tr>{label_cell}{cr_cell}{tp_cell}{empty1}{empty2}</w:tr>"
-
-    # Agrupar por semestre
-    from collections import defaultdict
-    semestres: dict = defaultdict(list)
-    for c in cursos_pendientes:
-        sem = c.get("semestre", 0)
-        semestres[sem].append(c)
-
-    rows = ""
-    if show_header:
-        titulo_global = f"<w:tc><w:tcPr><w:tcW w:w='{total_w}' w:type='dxa'/><w:gridSpan w:val='7'/><w:shd w:val='clear' w:color='auto' w:fill='1F3864'/></w:tcPr><w:p><w:pPr><w:jc w:val='center'/><w:spacing w:before='40' w:after='40'/></w:pPr><w:r><w:rPr><w:rFonts w:ascii='Arial Narrow' w:hAnsi='Arial Narrow' w:cs='Arial'/><w:b/><w:color w:val='FFFFFF'/><w:sz w:val='18'/><w:szCs w:val='18'/></w:rPr><w:t>PLAN DE ESTUDIOS PROGRAMA INGENIERÍA DE SOFTWARE Y COMPUTACIÓN</w:t></w:r></w:p></w:tc>"
-        rows += f"<w:tr>{titulo_global}</w:tr>"
-        subtitulo = f"<w:tc><w:tcPr><w:tcW w:w='{total_w}' w:type='dxa'/><w:gridSpan w:val='7'/><w:shd w:val='clear' w:color='auto' w:fill='1F3864'/></w:tcPr><w:p><w:pPr><w:jc w:val='center'/><w:spacing w:before='40' w:after='40'/></w:pPr><w:r><w:rPr><w:rFonts w:ascii='Arial Narrow' w:hAnsi='Arial Narrow' w:cs='Arial'/><w:b/><w:color w:val='FFFFFF'/><w:sz w:val='18'/><w:szCs w:val='18'/></w:rPr><w:t>Aprobado en el Consejo Académico de Diciembre de 2019</w:t></w:r></w:p></w:tc>"
-        rows += f"<w:tr>{subtitulo}</w:tr>"
-
-    nombres_sem = {
-        1: "PRIMER SEMESTRE", 2: "SEGUNDO SEMESTRE", 3: "TERCER SEMESTRE",
-        4: "CUARTO SEMESTRE", 5: "QUINTO SEMESTRE", 6: "SEXTO SEMESTRE",
-        7: "SÉPTIMO SEMESTRE", 8: "OCTAVO SEMESTRE", 9: "NOVENO SEMESTRE",
-        10: "TRABAJO DE GRADO",
-        11: "REQUISITOS DE GRADO",
-    }
-
-    for sem_num in sorted(semestres.keys()):
-        cursos = semestres[sem_num]
-        nom = nombres_sem.get(sem_num, f"SEMESTRE {sem_num}")
-        rows += titulo_semestre(nom)
-        total_cr = 0
-        total_tp = 0
-        for idx, c in enumerate(cursos, 1):
-            cr = c.get("creditos", 0) or 0
-            tp = c.get("tiempo_presencial", cr) or cr
-            total_cr += cr
-            total_tp += tp
-            cells = (
-                _cell(str(idx), width=W[0], align="center") +
-                _cell(str(c.get("codigo", "")), width=W[1]) +
-                _cell(c.get("nombre", ""), width=W[2]) +
-                _cell(str(cr), width=W[3], align="center") +
-                _cell(str(tp), width=W[4], align="center") +
-                _cell(c.get("tipo", ""), width=W[5], align="center") +
-                _cell(c.get("linea_continuidad", ""), width=W[6])
-            )
-            rows += f"<w:tr>{cells}</w:tr>"
-        rows += total_row(total_cr, total_tp)
-
-    return f"""<w:tbl>
-      <w:tblPr>
-        <w:tblW w:w="{total_w}" w:type="dxa"/>
-        <w:tblBorders>
-          <w:top w:val="single" w:sz="4" w:color="000000"/>
-          <w:left w:val="single" w:sz="4" w:color="000000"/>
-          <w:bottom w:val="single" w:sz="4" w:color="000000"/>
-          <w:right w:val="single" w:sz="4" w:color="000000"/>
-          <w:insideH w:val="single" w:sz="4" w:color="000000"/>
-          <w:insideV w:val="single" w:sz="4" w:color="000000"/>
-        </w:tblBorders>
-      </w:tblPr>
-      <w:tblGrid>{" ".join(f'<w:gridCol w:w="{w}"/>' for w in W)}</w:tblGrid>
-      {rows}
-    </w:tbl>"""
-
-
-def _tabla_cursos_autorizar(cursos: list) -> str:
-    """Tabla ARTÍCULO 3: Cursos autorizados para matrícula."""
-    W = [400, 900, 3300, 900, 500, 500, 500, 1860]
-    total_w = sum(W)
-    headers = ["N°", "Código", "CURSO", "SEMESTRE", "CR", "IH", "TP", "Línea de Continuidad"]
-    h_row = "".join(_cell(h, bold=True, bgcolor="1F3864", color_txt="FFFFFF", width=w, align="center")
-                    for h, w in zip(headers, W))
-    rows = f"<w:tr>{h_row}</w:tr>"
-    total_cr = 0
-    for i, c in enumerate(cursos, 1):
-        cr = c.get("creditos", 0) or 0
-        total_cr += cr
-        sem = SEMESTRE_ROMANO.get(c.get("semestre", 0), "")
-        bg = "" if i % 2 == 0 else "F2F2F2"
-        cells = (
-            _cell(str(i), width=W[0], bgcolor=bg, align="center") +
-            _cell(str(c.get("codigo", "")), width=W[1], bgcolor=bg) +
-            _cell(c.get("nombre", ""), width=W[2], bgcolor=bg) +
-            _cell(sem, width=W[3], bgcolor=bg, align="center") +
-            _cell(str(cr), width=W[4], bgcolor=bg, align="center") +
-            _cell(str(c.get("ih", cr)), width=W[5], bgcolor=bg, align="center") +
-            _cell(c.get("tipo", ""), width=W[6], bgcolor=bg, align="center") +
-            _cell(c.get("linea", ""), width=W[7], bgcolor=bg)
-        )
-        rows += f"<w:tr>{cells}</w:tr>"
-
-    # Totales
-    def tot_row(label: str, val) -> str:
-        span = sum(W[:-1])
-        c1 = f"<w:tc><w:tcPr><w:tcW w:w='{span}' w:type='dxa'/><w:gridSpan w:val='7'/></w:tcPr><w:p><w:pPr><w:spacing w:before='40' w:after='40'/></w:pPr><w:r><w:rPr><w:rFonts w:ascii='Arial Narrow' w:hAnsi='Arial Narrow' w:cs='Arial'/><w:b/><w:sz w:val='18'/><w:szCs w:val='18'/></w:rPr><w:t xml:space='preserve'>{_esc(label)}</w:t></w:r></w:p></w:tc>"
-        c2 = _cell(str(val), bold=True, width=W[-1], align="center")
-        return f"<w:tr>{c1}{c2}</w:tr>"
-
-    rows += tot_row("TOTAL CURSOS", len(cursos))
-    rows += tot_row("TOTAL CREDITOS", total_cr)
-
-    return f"""<w:tbl>
-      <w:tblPr>
-        <w:tblW w:w="{total_w}" w:type="dxa"/>
-        <w:tblBorders>
-          <w:top w:val="single" w:sz="4" w:color="000000"/>
-          <w:left w:val="single" w:sz="4" w:color="000000"/>
-          <w:bottom w:val="single" w:sz="4" w:color="000000"/>
-          <w:right w:val="single" w:sz="4" w:color="000000"/>
-          <w:insideH w:val="single" w:sz="4" w:color="000000"/>
-          <w:insideV w:val="single" w:sz="4" w:color="000000"/>
-        </w:tblBorders>
-      </w:tblPr>
-      <w:tblGrid>{" ".join(f'<w:gridCol w:w="{w}"/>' for w in W)}</w:tblGrid>
-      {rows}
-    </w:tbl>"""
-
-
-def _tabla_folios(folios: dict) -> str:
-    """Tabla de documentos analizados (Parágrafo 3 Art. 1)."""
-    W = [7000, 1760]
-    total_w = sum(W)
-    header = f"<w:tr>{_cell('Documento', bold=True, bgcolor='1F3864', color_txt='FFFFFF', width=W[0])}{_cell('Número de Folios', bold=True, bgcolor='1F3864', color_txt='FFFFFF', width=W[1], align='center')}</w:tr>"
-    docs = [
-        ("Formato de solicitud del aspirante/estudiante.", folios.get("solicitud", 1)),
-        ("Documento de aprobación legal del programa en la Institución de procedencia.", folios.get("aprobacion", 0)),
-        ("Certificado oficial de calificaciones, en el cual deben figurar todas las asignaturas cursadas por estudiantes, la intensidad horaria total, los créditos y la calificación de cada una de ellas.", folios.get("calificaciones", 2)),
-        ("Documento debidamente refrendado en donde conste el contenido programático de las asignaturas y aprobadas.", folios.get("contenido", 35)),
-        ("Certificado oficial de buena conducta, expedido por la institución de procedencia.", folios.get("conducta", 0)),
-    ]
-    rows = header
-    for i, (doc, n) in enumerate(docs):
-        bg = "" if i % 2 == 0 else "F2F2F2"
-        rows += f"<w:tr>{_cell(doc, width=W[0], bgcolor=bg)}{_cell(str(n), width=W[1], bgcolor=bg, align='center')}</w:tr>"
-    total = sum(n for _, n in docs)
-    rows += f"<w:tr>{_cell('TOTAL FOLIOS', bold=True, width=W[0])}{_cell(str(total), bold=True, width=W[1], align='center')}</w:tr>"
-    return f"""<w:tbl>
-      <w:tblPr><w:tblW w:w="{total_w}" w:type="dxa"/>
-        <w:tblBorders><w:top w:val="single" w:sz="4" w:color="000000"/><w:left w:val="single" w:sz="4" w:color="000000"/><w:bottom w:val="single" w:sz="4" w:color="000000"/><w:right w:val="single" w:sz="4" w:color="000000"/><w:insideH w:val="single" w:sz="4" w:color="000000"/><w:insideV w:val="single" w:sz="4" w:color="000000"/></w:tblBorders>
-      </w:tblPr>
-      <w:tblGrid><w:gridCol w:w="{W[0]}"/><w:gridCol w:w="{W[1]}"/></w:tblGrid>
-      {rows}
-    </w:tbl>"""
-
-
-def _obj_to_dict(obj) -> dict:
-    """Convierte un objeto ORM o dict a diccionario de forma segura."""
-    if isinstance(obj, dict):
-        return obj
-    if hasattr(obj, "__dict__"):
-        return obj.__dict__
-    return {}
-
-
-def _get_attr(obj, key: str, default=None):
-    """Obtiene atributo de dict u objeto ORM de forma segura."""
-    if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
-
-
-def _build_document_xml(datos: dict) -> str:
-    """
-    Construye el XML completo de document.xml con toda la resolución.
-    datos debe contener:
-      - numero_resolucion: str
-      - fecha_str: str  (ej. "16 DIC. 2024")
-      - nombre_estudiante: str
-      - cedula: str
-      - ciudad_cedula: str
-      - programa_origen: str
-      - institucion_origen: str
-      - correo: str (opcional)
-      - telefono: str (opcional)
-      - asignaturas: list de HomologacionAsignatura o dicts
-      - cursos_pendientes: list  (calculado)
-      - cursos_autorizar: list  (calculado)
-      - periodo_autorizacion: str (ej. "primer período académico de 2025")
-      - fecha_pago: str (opcional)
-      - vicerrector: str
-      - coordinador: str
-      - fecha_notificacion: str
-      - transcriptor: str
-      - reviso: str
-    """
-    n = datos
-    NR = n.get("numero_resolucion", "XXX")
-    FECHA = n.get("fecha_str", "")
-    NOMBRE = n.get("nombre_estudiante", "").upper()
-    CC = n.get("cedula", "")
-    CIUDAD = n.get("ciudad_cedula", "Popayán")
-    PROG_ORIG = n.get("programa_origen", "")
-    INST_ORIG = n.get("institucion_origen", "")
-    PERIODO = n.get("periodo_autorizacion", "")
-    VICERRECTOR = n.get("vicerrector", "SEBASTIÁN TORO VÉLEZ")
-    COORDINADOR = n.get("coordinador", "JUAN PABLO DIAGO RODRÍGUEZ")
-    FECHA_NOT = n.get("fecha_notificacion", FECHA)
-    TRANSCRIPTOR = n.get("transcriptor", "")
-    REVISO = n.get("reviso", "")
-
-    # ✅ CORRECCIÓN: Convertir objetos ORM a dicts ANTES de usarlos
-    asigs_raw = n.get("asignaturas", [])
-    asigs = [_obj_to_dict(a) for a in asigs_raw]
-
-    cursos_pend_all = n.get("cursos_pendientes", [])
-    # Separar cursos regulares (sem 1-10) de requisitos de grado (sem 11)
-    cursos_pend = [c for c in cursos_pend_all if c.get("semestre", 0) <= 10]
-    cursos_req = [c for c in cursos_pend_all if c.get("semestre", 0) >= 11]
-    cursos_aut = n.get("cursos_autorizar", [])
-    folios = n.get("folios", {})
-
-    total_cursos = len(asigs)
-    total_creditos = sum(a.get("creditos_destino", 0) or 0 for a in asigs)
-
-    def p(text: str, bold_parts: list = None, indent: bool = False, align: str = "",
-          spacing_b: int = 0, spacing_a: int = 100) -> str:
-        """Párrafo de texto con soporte para partes en negrita."""
-        ppr = '<w:pStyle w:val="Normal"/>'
-        if indent:
-            ppr += '<w:ind w:left="720"/>'
-        if align:
-            ppr += f'<w:jc w:val="{align}"/>'
-        ppr += f'<w:spacing w:before="{spacing_b}" w:after="{spacing_a}"/>'
-        ppr_block = f"<w:pPr>{ppr}</w:pPr>"
-
-        if bold_parts is None:
-            rpr = '<w:rPr><w:rFonts w:ascii="Arial Narrow" w:hAnsi="Arial Narrow" w:cs="Arial"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr>'
-            space = ' xml:space="preserve"' if " " in text else ""
-            content = f'<w:r>{rpr}<w:t{space}>{_esc(text)}</w:t></w:r>'
-        else:
-            content = ""
-            for part, is_bold in bold_parts:
-                b = "<w:b/>" if is_bold else ""
-                rpr = f'<w:rPr><w:rFonts w:ascii="Arial Narrow" w:hAnsi="Arial Narrow" w:cs="Arial"/>{b}<w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr>'
-                space = ' xml:space="preserve"' if " " in part else ""
-                content += f'<w:r>{rpr}<w:t{space}>{_esc(part)}</w:t></w:r>'
-        return f"<w:p>{ppr_block}{content}</w:p>"
-
-    def titulo(text: str, color: str = "0070C0") -> str:
-        rpr = f'<w:rPr><w:rFonts w:ascii="Arial Narrow" w:hAnsi="Arial Narrow" w:cs="Arial"/><w:b/><w:color w:val="{color}"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr>'
-        return f'<w:p><w:pPr><w:pStyle w:val="Normal"/><w:jc w:val="center"/><w:spacing w:before="100" w:after="100"/></w:pPr><w:r>{rpr}<w:t xml:space="preserve">{_esc(text)}</w:t></w:r></w:p>'
-
-    def seccion(text: str) -> str:
-        rpr = '<w:rPr><w:rFonts w:ascii="Arial Narrow" w:hAnsi="Arial Narrow" w:cs="Arial"/><w:b/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr>'
-        return f'<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="160" w:after="80"/></w:pPr><w:r>{rpr}<w:t>{_esc(text)}</w:t></w:r></w:p>'
-
-    def articulo(num: str, texto_parts: list) -> str:
-        content = ""
-        for part, bold in texto_parts:
-            b = "<w:b/>" if bold else ""
-            rpr = f'<w:rPr><w:rFonts w:ascii="Arial Narrow" w:hAnsi="Arial Narrow" w:cs="Arial"/>{b}<w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr>'
-            space = ' xml:space="preserve"' if " " in part else ""
-            content += f'<w:r>{rpr}<w:t{space}>{_esc(part)}</w:t></w:r>'
-        return f'<w:p><w:pPr><w:spacing w:before="160" w:after="80"/></w:pPr>{content}</w:p>'
-
-    def paragrafo(num: str, texto: str) -> str:
-        rpr_b = '<w:rPr><w:rFonts w:ascii="Arial Narrow" w:hAnsi="Arial Narrow" w:cs="Arial"/><w:b/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr>'
-        rpr_n = '<w:rPr><w:rFonts w:ascii="Arial Narrow" w:hAnsi="Arial Narrow" w:cs="Arial"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr>'
-        return f'<w:p><w:pPr><w:spacing w:before="80" w:after="80"/></w:pPr><w:r>{rpr_b}<w:t xml:space="preserve">{_esc("Parágrafo " + num + ". ")}</w:t></w:r><w:r>{rpr_n}<w:t xml:space="preserve">{_esc(texto)}</w:t></w:r></w:p>'
-
-    parts = []
-
-    # ── Encabezado centrado ──────────────────────────────────────────────────
-    parts.append(titulo(f"RESOLUCIÓN No. {NR}"))
-    parts.append(titulo("Del"))
-    parts.append(titulo(f"({FECHA})"))
-    parts.append(p(""))
-
-    # ── Considerando intro ───────────────────────────────────────────────────
-    intro = (
-        f"Por la cual se aprueba el estudio de homologación de los cursos aprobados en el {INST_ORIG.upper()}, "
-        f"Programa de "
+def _plantilla_path() -> str:
+    for path in [
+        PLANTILLA_PATH,
+        "templates/plantilla_resolucion_matricula.docx",
+        "/app/templates/plantilla_resolucion_matricula.docx",
+    ]:
+        if os.path.exists(path):
+            return path
+    raise FileNotFoundError(
+        f"Plantilla no encontrada. Se buscó en: {PLANTILLA_PATH}"
     )
-    parts.append(p("", bold_parts=[
-        (intro, False),
-        (PROG_ORIG.upper(), True),
-        (f", por el señor {NOMBRE}, identificado con la Cédula No. {CC} de {CIUDAD}.", False),
-    ]))
-    parts.append(p(""))
-    parts.append(p(
-        "El suscrito Vicerrector Académico de la CORPORACIÓN UNIVERSITARIA AUTÓNOMA DEL CAUCA, "
-        "en uso de sus atribuciones reglamentarias y en especial las conferidas en el Acuerdo 010 de 2005 "
-        "expedida por la ASAMBLEA DE FUNDADORES y el Reglamento Estudiantil Acuerdo 011 del 15 febrero de 2017. Artículo 32 y;"
-    ))
-    parts.append(p(""))
-    parts.append(seccion("CONSIDERANDO"))
-    parts.append(p(""))
-
-    parts.append(p(
-        f"Que el Decano de la Facultad de Ingeniería y Ciencias Naturales, realizó el estudio de "
-        f"homologación de los cursos aprobados en la ({INST_ORIG.upper()}), por el señor {NOMBRE}, "
-        f"identificado con cédula de ciudadanía No. {CC} de {CIUDAD}.",
-        indent=False
-    ))
-    parts.append(p(""))
-    parts.append(p(
-        f"Que el Vicerrector Académico revisó los procedimientos aplicados y los anexos allegados por el señor "
-        f"{NOMBRE} identificado con la Cédula No. {CC} de {CIUDAD}., para el estudio y análisis de la homologación "
-        f"realizada por el Decano de la Facultad de Ingeniería y Ciencias Naturales, con el correspondiente "
-        f"pensum vigente del Programa de Ingeniería de Software y Computación aprobado mediante Resolución No. 15865 "
-        f"del 18 de diciembre del 2019, y por lo anterior."
-    ))
-    parts.append(p(""))
-    parts.append(seccion("RESUELVE"))
-    parts.append(p(""))
-
-    # ── ARTÍCULO 1 ───────────────────────────────────────────────────────────
-    parts.append(articulo("1°", [
-        ("ARTICULO 1°. ", True),
-        (f"Aprobar el estudio de homologación del señor {NOMBRE} identificado con la Cédula No. {CC} de {CIUDAD}, de la siguiente manera: ", False),
-    ]))
-    parts.append(p("Entiéndase: CR: Crédito Académico, IH: Intensidad Horaria, TP: Tipo: T: Teórico, P: Práctico; TP: Teórico Práctico, NA: No Aplica."))
-    parts.append(p(""))
-
-    # Tabla homologadas — ya están convertidos a dicts arriba
-    parts.append(_tabla_homologadas(asigs, PROG_ORIG, INST_ORIG))
-    parts.append(p(""))
-
-    # ── ARTÍCULO 2 ───────────────────────────────────────────────────────────
-    parts.append(articulo("2°", [
-        ("ARTICULO 2°. ", True),
-        ("Definir los cursos pendientes por cursar y aprobar en la Corporación Universitaria Autónoma del Cauca así:", False),
-    ]))
-    parts.append(p(""))
-    if cursos_pend:
-        parts.append(_tabla_cursos_pendientes(cursos_pend))
-    parts.append(p(""))
-
-    # Parágrafo 1: Requisitos de grado (tabla)
-    parts.append(paragrafo(
-        "1",
-        "Se debe presentar como requisito de grado los siguientes certificados:"
-    ))
-    parts.append(p(""))
-    if cursos_req:
-        parts.append(_tabla_cursos_pendientes(cursos_req, show_header=False))
-    parts.append(p(""))
-
-    # Parágrafo 2: Documentos analizados (folios)
-    parts.append(p("", bold_parts=[
-        ("Parágrafo 2. ", True),
-        ("Para realizar este estudio se analizaron los siguientes documentos, los cuales reposarán en la hoja de vida del aspirante/estudiante:", False),
-    ]))
-    parts.append(_tabla_folios(folios))
-    parts.append(p(""))
-
-    # ── ARTÍCULO 3 ───────────────────────────────────────────────────────────
-    parts.append(articulo("3°", [
-        ("ARTICULO 3°. ", True),
-        (f"Autorizar matricular para el {PERIODO} los siguientes cursos:", False),
-    ]))
-    parts.append(p(""))
-    if cursos_aut:
-        parts.append(_tabla_cursos_autorizar(cursos_aut))
-    parts.append(p(""))
-
-    parts.append(paragrafo(
-        "1",
-        "Para legalizar el proceso de matrícula tanto académica como financiera, deberá cancelar los derechos pecuniarios correspondientes."
-    ))
-    parts.append(p(""))
-    parts.append(paragrafo(
-        "2",
-        "El aspirante/estudiante tendrá derecho a solicitar la revisión del estudio, para lo cual tendrá un plazo "
-        "máximo de ocho días siguientes a su notificación, siempre y cuando esta revisión se refiera a la documentación "
-        "entregada inicialmente. Cuando el aspirante/estudiante desee incorporar nuevos contenidos, se debe solicitar y "
-        "realizar un nuevo estudio de homologación."
-    ))
-    parts.append(p(""))
-
-    # ── ARTÍCULO 4 ───────────────────────────────────────────────────────────
-    parts.append(articulo("4°", [
-        ("ARTICULO 4°. ", True),
-        ("  La presente resolución rige a partir de la fecha de su expedición.", False),
-    ]))
-    parts.append(p(""))
-    parts.append(seccion("NOTIFIQUESE Y CUMPLASE"))
-    parts.append(p(""))
-    parts.append(p(f"Popayán, {FECHA}"))
-    parts.append(p(""))
-    parts.append(p(""))
-
-    # Firmas (dos columnas con tabs)
-    rpr_b = '<w:rPr><w:rFonts w:ascii="Arial Narrow" w:hAnsi="Arial Narrow" w:cs="Arial"/><w:b/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr>'
-    firma_row = f'<w:p><w:pPr><w:tabs><w:tab w:val="center" w:pos="4680"/></w:tabs><w:spacing w:before="80" w:after="40"/></w:pPr><w:r>{rpr_b}<w:t xml:space="preserve">{_esc(VICERRECTOR)}</w:t></w:r><w:r><w:rPr><w:tab/></w:rPr><w:tab/></w:r><w:r>{rpr_b}<w:t xml:space="preserve">{_esc(COORDINADOR)}</w:t></w:r></w:p>'
-    cargo_row = f'<w:p><w:pPr><w:tabs><w:tab w:val="center" w:pos="4680"/></w:tabs><w:spacing w:before="40" w:after="80"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Arial Narrow" w:hAnsi="Arial Narrow" w:cs="Arial"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr><w:t xml:space="preserve">Vicerrector Académico</w:t></w:r><w:r><w:rPr><w:tab/></w:rPr><w:tab/></w:r><w:r><w:rPr><w:rFonts w:ascii="Arial Narrow" w:hAnsi="Arial Narrow" w:cs="Arial"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr><w:t xml:space="preserve">Coordinador Programa de Ingeniería de Software</w:t></w:r></w:p>'
-    parts.append(firma_row)
-    parts.append(cargo_row)
-    parts.append(p(""))
-
-    # Notificado
-    parts.append(p("Notificado (a): "))
-    parts.append(p(""))
-    parts.append(p(NOMBRE, bold_parts=[(NOMBRE, True)]))
-    parts.append(p(f"Cédula de Ciudadanía No. {CC} de {CIUDAD}", bold_parts=[(f"Cédula de Ciudadanía No. {CC} de {CIUDAD}", True)]))
-    parts.append(p(""))
-    parts.append(p(f"Fecha de notificación: {FECHA_NOT}"))
-    parts.append(p(""))
-    parts.append(p("", bold_parts=[("Copia: ", False), ("\t\tVicerrectoría Académica", False)]))
-    parts.append(p("\t\tOficina de Control y Registro (Hoja de Vida estudiante)"))
-    parts.append(p("\t\tGestión Documental"))
-    if TRANSCRIPTOR:
-        parts.append(p("", bold_parts=[("Transcriptor:\t\t", False), (TRANSCRIPTOR, False)]))
-    if REVISO:
-        parts.append(p("", bold_parts=[("Revisó:\t\t", False), (REVISO, False)]))
-
-    body_content = "\n".join(parts)
-
-    # XML completo del documento manteniendo los namespaces del original
-    return f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:wpc="http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas"
-  xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex"
-  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
-  xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"
-  xmlns:v="urn:schemas-microsoft-com:vml"
-  xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
-  xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-  xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml"
-  xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml"
-  mc:Ignorable="w14 w15">
-  <w:body>
-    {body_content}
-    <w:sectPr>
-      <w:headerReference w:type="default" r:id="rId1"/>
-      <w:footerReference w:type="default" r:id="rId2"/>
-      <w:pgSz w:w="12240" w:h="15840"/>
-      <w:pgMar w:top="1134" w:right="1134" w:bottom="1701" w:left="1134" w:header="708" w:footer="708" w:gutter="0"/>
-    </w:sectPr>
-  </w:body>
-</w:document>'''
 
 
 def generar_resolucion_docx(homologacion, solicitud, asignaturas_destino=None) -> str:
     """
-    Punto de entrada principal. Recibe los modelos ORM y genera el .docx.
-    asignaturas_destino: lista de Asignatura del programa destino (para cursos pendientes).
-    Retorna la ruta al archivo generado.
+    Genera la resolución Word usando docxtpl.
+    Retorna la ruta local al archivo .docx generado.
     """
-    import tempfile
-    import shutil
+    estudiante = solicitud.estudiante
+    nombre_completo = f"{estudiante.nombre} {estudiante.apellido}".upper()
 
-    # Crear directorio de trabajo temporal
-    tmpdir = tempfile.mkdtemp(prefix="homolog_")
-    unpacked_dir = os.path.join(tmpdir, "unpacked")
+    hoy = datetime.now()
+    fecha_larga = f"{hoy.day} de {MESES_ES[hoy.month]} de {hoy.year}"
+    fecha_notificacion = f"{hoy.day:02d}/{hoy.month:02d}/{hoy.year}"
 
-    try:
-        # 1. Copiar y desempacar la plantilla oficial
-        plantilla_src = PLANTILLA_PATH
-        if not os.path.exists(plantilla_src):
-            for alt in [
-                "templates/resolucion_plantilla.docx",
-                "/app/templates/resolucion_plantilla.docx",
-            ]:
-                if os.path.exists(alt):
-                    plantilla_src = alt
-                    break
+    # ── Cursos homologados → bloque 1 ─────────────────────────────────────────
+    cursos_bloque1 = []
+    total_creditos_bloque1 = 0
 
-        plantilla_copia = os.path.join(tmpdir, "plantilla.docx")
-        shutil.copy2(plantilla_src, plantilla_copia)
-        _unpack_docx(plantilla_copia, unpacked_dir)
+    for a in homologacion.asignaturas:
+        cr = _safe_int(getattr(a, "creditos_destino", None))
+        total_creditos_bloque1 += cr
+        calif_raw = getattr(a, "calificacion_origen", None)
+        calif = str(calif_raw).replace(".", ",") if calif_raw is not None else ""
+        cursos_bloque1.append({
+            "origen":      getattr(a, "asignatura_origen", "") or "",
+            "codigo":      str(getattr(a, "codigo_destino", "") or ""),
+            "destino":     getattr(a, "asignatura_destino", "") or "",
+            "semestre":    _sem_romano(getattr(a, "semestre_destino", None)),
+            "cr":          str(cr) if cr else "",
+            "ih":          str(getattr(a, "intensidad_horaria_destino", "") or ""),
+            "tipo":        getattr(a, "tipo_destino", "") or "",
+            "calificacion": calif,
+        })
 
-        # 2. Construir datos para el documento
-        estudiante = solicitud.estudiante
-        nombre_completo = f"{estudiante.nombre} {estudiante.apellido}".upper()
+    # ── Bloque 2 vacío (un solo origen en la solicitud actual) ───────────────
+    cursos_bloque2: list = []
 
-        hoy = datetime.now()
-        fecha_str = f"{hoy.day} {MESES_ES[hoy.month]}. {hoy.year}"
-        fecha_not = f"{hoy.day:02d}/{hoy.month:02d}/{hoy.year}"
-
-        # Calcular cursos pendientes: asignaturas del programa destino que NO fueron homologadas
-        cursos_pendientes = []
-        cursos_autorizar = []
-        if asignaturas_destino:
-            nombres_homologados = {
-                (a.asignatura_destino or "").strip().lower()
-                for a in homologacion.asignaturas
-                if a.estado.value == "homologada" and a.asignatura_destino
-            }
-            codigos_homologados = {
-                (a.codigo_destino or "").strip()
-                for a in homologacion.asignaturas
-                if a.estado.value == "homologada" and a.codigo_destino
-            }
-            pendientes_ordenados = sorted(
-                asignaturas_destino,
-                key=lambda x: (x.semestre or 99, x.nombre)
-            )
-            for asig in pendientes_ordenados:
-                nombre_norm = asig.nombre.strip().lower()
-                codigo_norm = (asig.codigo or "").strip()
-                ya_homologada = (
-                    nombre_norm in nombres_homologados
-                    or (codigo_norm and codigo_norm in codigos_homologados)
-                )
-                if not ya_homologada:
-                    cursos_pendientes.append({
-                        "codigo": asig.codigo or "",
-                        "nombre": asig.nombre,
-                        "creditos": asig.creditos,
-                        "tiempo_presencial": asig.intensidad_horaria or asig.creditos,
-                        "tipo": asig.tipo or "",
-                        "linea_continuidad": asig.linea_continuidad or "",
-                        "semestre": asig.semestre or 0,
-                    })
-
-            # cursos_autorizar: asignaturas regulares pendientes (sem 1-9) del semestre más bajo
-            cursos_regulares = [c for c in cursos_pendientes if 0 < c["semestre"] <= 9]
-            if cursos_regulares:
-                sem_min = min(c["semestre"] for c in cursos_regulares)
-                cursos_autorizar = [
-                    {
-                        "codigo": c["codigo"],
-                        "nombre": c["nombre"],
-                        "creditos": c["creditos"],
-                        "ih": c["tiempo_presencial"],
-                        "tipo": c["tipo"],
-                        "linea": c["linea_continuidad"],
-                        "semestre": c["semestre"],
-                    }
-                    for c in cursos_regulares if c["semestre"] == sem_min
-                ]
-
-        datos = {
-            "numero_resolucion": solicitud.numero_resolucion or "____",
-            "fecha_str": fecha_str,
-            "nombre_estudiante": nombre_completo,
-            "cedula": solicitud.cedula or "",
-            "ciudad_cedula": "Popayán",
-            "correo": getattr(estudiante, "email", ""),
-            "telefono": solicitud.telefono or "",
-            "programa_origen": solicitud.programa_origen or "",
-            "institucion_origen": solicitud.institucion_origen or "",
-            "programa_destino": solicitud.programa_destino or "",
-            "institucion_destino": solicitud.institucion_destino or "",
-            "asignaturas": homologacion.asignaturas,
-            "cursos_pendientes": cursos_pendientes,
-            "cursos_autorizar": cursos_autorizar,
-            "periodo_autorizacion": f"segundo período académico del {hoy.year}",
-            "folios": {"solicitud": 1, "aprobacion": 0, "calificaciones": 2, "contenido": 35, "conducta": 0},
-            "vicerrector": "SEBASTIÁN TORO VÉLEZ",
-            "coordinador": "JUAN PABLO DIAGO RODRÍGUEZ",
-            "fecha_notificacion": fecha_not,
-            "transcriptor": "",
-            "reviso": "",
+    # ── Cursos proyectados (semestre más bajo pendiente, sem 1-9) ─────────────
+    cursos_proyectados = []
+    if asignaturas_destino:
+        nombres_homologados = {
+            (getattr(a, "asignatura_destino", "") or "").strip().lower()
+            for a in homologacion.asignaturas
+            if getattr(a, "estado", None) and a.estado.value == "homologada"
+        }
+        codigos_homologados = {
+            (getattr(a, "codigo_destino", "") or "").strip()
+            for a in homologacion.asignaturas
+            if getattr(a, "estado", None) and a.estado.value == "homologada" and a.codigo_destino
         }
 
-        # 3. Reemplazar document.xml
-        doc_xml = _build_document_xml(datos)
-        doc_xml_path = os.path.join(unpacked_dir, "word", "document.xml")
-        with open(doc_xml_path, "w", encoding="utf-8") as f:
-            f.write(doc_xml)
+        pendientes = [
+            a for a in asignaturas_destino
+            if 0 < _safe_int(getattr(a, "semestre", None)) <= 9
+            and (getattr(a, "nombre", "") or "").strip().lower() not in nombres_homologados
+            and (getattr(a, "codigo", "") or "").strip() not in codigos_homologados
+        ]
+        pendientes.sort(key=lambda x: (_safe_int(getattr(x, "semestre", 99)), getattr(x, "nombre", "")))
 
-        # 4. Empacar de vuelta
-        output_dir = os.path.join("uploads", "resoluciones")
-        os.makedirs(output_dir, exist_ok=True)
-        output_path = os.path.join(output_dir, f"resolucion_{solicitud.id}.docx")
+        if pendientes:
+            sem_min = _safe_int(getattr(pendientes[0], "semestre", 1))
+            for a in pendientes:
+                if _safe_int(getattr(a, "semestre", None)) != sem_min:
+                    break
+                cr = _safe_int(getattr(a, "creditos", None))
+                cursos_proyectados.append({
+                    "codigo":   getattr(a, "codigo", "") or "",
+                    "curso":    getattr(a, "nombre", "") or "",
+                    "semestre": _sem_romano(getattr(a, "semestre", None)),
+                    "cr":       str(cr) if cr else "",
+                    "ih":       str(getattr(a, "intensidad_horaria", None) or cr or ""),
+                    "tipo":     getattr(a, "tipo", "") or "",
+                })
 
-        # ✅ CORRECCIÓN: Usar zipfile en lugar de subprocess
-        _pack_docx(unpacked_dir, output_path)
+    total_creditos_proyectados = sum(
+        _safe_int(c["cr"]) for c in cursos_proyectados
+    )
 
-        logger.info(f"Resolución generada: {output_path}")
-        return output_path
+    # ── Documentos analizados ─────────────────────────────────────────────────
+    documentos_anexos = list(DOCUMENTOS_FOLIOS)
+    total_folios = sum(d["folios"] for d in documentos_anexos)
 
-    except Exception as e:
-        logger.error(f"Error generando resolución: {str(e)}", exc_info=True)
-        raise
-    finally:
-        shutil.rmtree(tmpdir, ignore_errors=True)
+    # ── Contexto Jinja2 ───────────────────────────────────────────────────────
+    context = {
+        "numero_resolucion":        solicitud.numero_resolucion or "____",
+        "fecha_resolucion":         fecha_larga,
+        "fecha_firma":              fecha_larga,
+        "fecha_notificacion":       fecha_notificacion,
+        "nombre_revisor":           "JUAN PABLO DIAGO RODRÍGUEZ",
+        "nombre_estudiante":        nombre_completo,
+        "cedula":                   solicitud.cedula or "",
+        "ciudad":                   "Popayán",
+        "bloque1_programa_origen":  (solicitud.programa_origen or "").upper(),
+        "bloque1_institucion_origen": (solicitud.institucion_origen or "").upper(),
+        "bloque2_programa_origen":  "",
+        "bloque2_institucion_origen": "",
+        "cursos_bloque1":           cursos_bloque1,
+        "total_cursos_bloque1":     len(cursos_bloque1),
+        "total_creditos_bloque1":   total_creditos_bloque1,
+        "cursos_bloque2":           cursos_bloque2,
+        "total_cursos_bloque2":     0,
+        "total_creditos_bloque2":   0,
+        "documentos_anexos":        documentos_anexos,
+        "total_folios":             total_folios,
+        "cursos_proyectados":       cursos_proyectados,
+        "total_cursos_proyectados": len(cursos_proyectados),
+        "total_creditos_proyectados": total_creditos_proyectados,
+    }
 
+    tpl = DocxTemplate(_plantilla_path())
+    tpl.render(context)
 
+    output_dir = os.path.join("uploads", "resoluciones")
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, f"resolucion_{solicitud.id}.docx")
+    tpl.save(output_path)
+
+    logger.info("Resolución generada: %s", output_path)
+    return output_path
