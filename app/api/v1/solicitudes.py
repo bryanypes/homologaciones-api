@@ -22,12 +22,7 @@ from typing import Optional as OptionalType
 router = APIRouter(prefix="/solicitudes", tags=["Solicitudes"])
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Schemas adicionales para catálogos
-# ──────────────────────────────────────────────────────────────────────────────
-
 class InstitucionOpcionResponse(BaseModel):
-    """Opción de institución para seleccionar al crear solicitud"""
     id: UUID
     nombre: str
     tipo: OptionalType[str] = None
@@ -37,7 +32,6 @@ class InstitucionOpcionResponse(BaseModel):
 
 
 class ProgramaOpcionResponse(BaseModel):
-    """Opción de programa para seleccionar al crear solicitud"""
     id: UUID
     nombre: str
     institucion_id: UUID
@@ -48,10 +42,6 @@ class ProgramaOpcionResponse(BaseModel):
 
     model_config = {"from_attributes": True}
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Helpers internos
-# ──────────────────────────────────────────────────────────────────────────────
 
 async def _obtener_solicitud(solicitud_id: UUID, db: AsyncSession) -> Solicitud:
     result = await db.execute(
@@ -72,26 +62,19 @@ async def _obtener_solicitud(solicitud_id: UUID, db: AsyncSession) -> Solicitud:
 async def _verificar_scope_estudiante(
     solicitud: Solicitud, usuario: Usuario
 ) -> None:
-    """Estudiante solo puede ver/editar sus propias solicitudes"""
     if usuario.rol == Rol.ESTUDIANTE and solicitud.estudiante_id != usuario.id:
         raise HTTPException(status_code=403, detail="Sin permisos sobre esta solicitud")
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Endpoints — Catálogos (opciones para crear solicitud)
-# ──────────────────────────────────────────────────────────────────────────────
 
 @router.get(
     "/opciones/instituciones",
     response_model=list[InstitucionOpcionResponse],
     summary="Listar instituciones",
-    description="Retorna las instituciones disponibles para elegir al crear una solicitud.",
 )
 async def listar_instituciones(
     db: AsyncSession = Depends(get_db),
     _: Usuario = Depends(get_current_user),
 ):
-    """Lista todas las instituciones disponibles"""
     result = await db.execute(
         select(Institucion).order_by(Institucion.nombre)
     )
@@ -112,18 +95,16 @@ async def listar_programas(
     db: AsyncSession = Depends(get_db),
     _: Usuario = Depends(get_current_user),
 ):
-    """Lista programas con opción de filtrar por institución"""
     query = select(Programa).options(
         selectinload(Programa.institucion)
     ).order_by(Programa.nombre)
-    
+
     if institucion_id:
         query = query.where(Programa.institucion_id == institucion_id)
-    
+
     result = await db.execute(query)
     programas = result.scalars().all()
-    
-    # Enriquecer respuesta con nombre de institución
+
     response = []
     for prog in programas:
         data = ProgramaOpcionResponse.model_validate(prog)
@@ -133,10 +114,6 @@ async def listar_programas(
     
     return response
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Endpoints — CRUD de Solicitudes
-# ──────────────────────────────────────────────────────────────────────────────
 
 @router.post(
     "/",
@@ -158,9 +135,6 @@ async def crear_solicitud(
     db: AsyncSession = Depends(get_db),
     usuario: Usuario = Depends(require_rol(Rol.ESTUDIANTE)),
 ):
-    """Crear nueva solicitud"""
-    
-    # Inicializar valores de institución y programa
     institucion_origen = None
     programa_origen = None
     programa_origen_id = None
@@ -168,9 +142,7 @@ async def crear_solicitud(
     programa_destino = None
     programa_destino_id = None
 
-    # ── ORIGEN ────────────────────────────────────────────────────────
     if data.programa_origen_id:
-        # Elegido del catálogo
         result = await db.execute(
             select(Programa)
             .where(Programa.id == data.programa_origen_id)
@@ -179,25 +151,21 @@ async def crear_solicitud(
         prog = result.scalar_one_or_none()
         if not prog:
             raise HTTPException(status_code=400, detail="Programa origen no encontrado")
-        
         institucion_origen = prog.institucion.nombre if prog.institucion else None
         programa_origen = prog.nombre
         programa_origen_id = prog.id
-    
+
     elif data.institucion_origen_texto and data.programa_origen_texto:
-        # Texto libre (opción "Otra")
         institucion_origen = data.institucion_origen_texto
         programa_origen = data.programa_origen_texto
-    
+
     else:
         raise HTTPException(
             status_code=400,
             detail="Debes elegir un programa del catálogo o escribir 'Otra'"
         )
 
-    # ── DESTINO ───────────────────────────────────────────────────────
     if data.programa_destino_id:
-        # Elegido del catálogo
         result = await db.execute(
             select(Programa)
             .where(Programa.id == data.programa_destino_id)
@@ -206,23 +174,20 @@ async def crear_solicitud(
         prog = result.scalar_one_or_none()
         if not prog:
             raise HTTPException(status_code=400, detail="Programa destino no encontrado")
-        
         institucion_destino = prog.institucion.nombre if prog.institucion else None
         programa_destino = prog.nombre
         programa_destino_id = prog.id
-    
+
     elif data.institucion_destino_texto and data.programa_destino_texto:
-        # Texto libre (opción "Otra")
         institucion_destino = data.institucion_destino_texto
         programa_destino = data.programa_destino_texto
-    
+
     else:
         raise HTTPException(
             status_code=400,
             detail="Debes elegir un programa destino del catálogo o escribir 'Otra'"
         )
 
-    # Cédula: preferir la del perfil del usuario; si se provee una diferente, actualizarla
     cedula_final = usuario.cedula
     if data.cedula and data.cedula != usuario.cedula:
         dup = await db.execute(
@@ -233,12 +198,10 @@ async def crear_solicitud(
         usuario.cedula = data.cedula
         cedula_final = data.cedula
 
-    # Teléfono: ídem
     telefono_final = data.telefono or usuario.telefono
     if data.telefono and data.telefono != usuario.telefono:
         usuario.telefono = data.telefono
 
-    # Crear solicitud
     solicitud = Solicitud(
         estudiante_id=usuario.id,
         cedula=cedula_final,
@@ -298,32 +261,24 @@ async def listar_solicitudes(
     db: AsyncSession = Depends(get_db),
     usuario: Usuario = Depends(get_current_user),
 ):
-    """Lista solicitudes según rol del usuario"""
-    
     query = select(Solicitud).options(selectinload(Solicitud.estudiante))
     count_query = select(func.count(Solicitud.id))
 
-    # Filtros según rol
     if usuario.rol == Rol.ESTUDIANTE:
-        # El estudiante solo ve sus propias solicitudes
         query = query.where(Solicitud.estudiante_id == usuario.id)
         count_query = count_query.where(Solicitud.estudiante_id == usuario.id)
     else:
-        # Coordinador y Rector pueden filtrar por estudiante
         if estudiante_id:
             query = query.where(Solicitud.estudiante_id == estudiante_id)
             count_query = count_query.where(Solicitud.estudiante_id == estudiante_id)
 
-    # Filtro por estado (aplica a todos)
     if estado:
         query = query.where(Solicitud.estado == estado)
         count_query = count_query.where(Solicitud.estado == estado)
 
-    # Contar total
     total_result = await db.execute(count_query)
     total = total_result.scalar_one()
 
-    # Paginar y ordenar
     offset = (page - 1) * size
     query = query.order_by(Solicitud.creado_en.desc()).offset(offset).limit(size)
     result = await db.execute(query)
@@ -343,7 +298,6 @@ async def obtener_solicitud(
     db: AsyncSession = Depends(get_db),
     usuario: Usuario = Depends(get_current_user),
 ):
-    """Obtener una solicitud específica"""
     solicitud = await _obtener_solicitud(solicitud_id, db)
     await _verificar_scope_estudiante(solicitud, usuario)
     
@@ -370,7 +324,6 @@ async def actualizar_solicitud(
     db: AsyncSession = Depends(get_db),
     usuario: Usuario = Depends(require_rol(Rol.ESTUDIANTE)),
 ):
-    """Actualizar solicitud (solo en estado BORRADOR)"""
     solicitud = await _obtener_solicitud(solicitud_id, db)
     await _verificar_scope_estudiante(solicitud, usuario)
 
@@ -380,7 +333,6 @@ async def actualizar_solicitud(
             detail="Solo se pueden editar solicitudes en estado BORRADOR"
         )
 
-    # Actualizar datos personales (con validación de unicidad de cédula)
     if data.cedula is not None and data.cedula != usuario.cedula:
         dup = await db.execute(
             select(Usuario).where(Usuario.cedula == data.cedula, Usuario.id != usuario.id)
@@ -397,7 +349,6 @@ async def actualizar_solicitud(
     if data.correo_contacto is not None:
         solicitud.correo_contacto = data.correo_contacto
 
-    # ── ORIGEN ────────────────────────────────────────────────────────
     if data.programa_origen_id:
         result = await db.execute(
             select(Programa)
@@ -407,17 +358,15 @@ async def actualizar_solicitud(
         prog = result.scalar_one_or_none()
         if not prog:
             raise HTTPException(status_code=400, detail="Programa origen no encontrado")
-        
         solicitud.institucion_origen = prog.institucion.nombre if prog.institucion else None
         solicitud.programa_origen = prog.nombre
         solicitud.programa_origen_id = prog.id
-    
+
     elif data.institucion_origen_texto and data.programa_origen_texto:
         solicitud.institucion_origen = data.institucion_origen_texto
         solicitud.programa_origen = data.programa_origen_texto
         solicitud.programa_origen_id = None
 
-    # ── DESTINO ───────────────────────────────────────────────────────
     if data.programa_destino_id:
         result = await db.execute(
             select(Programa)
@@ -427,11 +376,10 @@ async def actualizar_solicitud(
         prog = result.scalar_one_or_none()
         if not prog:
             raise HTTPException(status_code=400, detail="Programa destino no encontrado")
-        
         solicitud.institucion_destino = prog.institucion.nombre if prog.institucion else None
         solicitud.programa_destino = prog.nombre
         solicitud.programa_destino_id = prog.id
-    
+
     elif data.institucion_destino_texto and data.programa_destino_texto:
         solicitud.institucion_destino = data.institucion_destino_texto
         solicitud.programa_destino = data.programa_destino_texto
@@ -459,7 +407,6 @@ async def enviar_solicitud(
     db: AsyncSession = Depends(get_db),
     usuario: Usuario = Depends(require_rol(Rol.ESTUDIANTE)),
 ):
-    """Enviar solicitud de BORRADOR a ENVIADA"""
     solicitud = await _obtener_solicitud(solicitud_id, db)
     await _verificar_scope_estudiante(solicitud, usuario)
 
@@ -510,7 +457,6 @@ async def cambiar_estado(
     db: AsyncSession = Depends(get_db),
     usuario: Usuario = Depends(require_rol(Rol.COORDINADOR, Rol.VICERRECTOR)),
 ):
-    """Cambiar el estado de una solicitud"""
     solicitud = await _obtener_solicitud(solicitud_id, db)
 
     if solicitud.estado == nuevo_estado:
@@ -563,7 +509,6 @@ async def eliminar_solicitud(
     db: AsyncSession = Depends(get_db),
     usuario: Usuario = Depends(require_rol(Rol.ESTUDIANTE)),
 ):
-    """Eliminar solicitud en BORRADOR"""
     solicitud = await _obtener_solicitud(solicitud_id, db)
     await _verificar_scope_estudiante(solicitud, usuario)
 
@@ -576,10 +521,6 @@ async def eliminar_solicitud(
     await db.delete(solicitud)
     await db.commit()
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Endpoints — Aprobación/Rechazo (Rector)
-# ──────────────────────────────────────────────────────────────────────────────
 
 @router.post(
     "/{solicitud_id}/aprobar",
@@ -713,10 +654,6 @@ async def rechazar_solicitud(
 
     return solicitud
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Endpoints — Historial
-# ──────────────────────────────────────────────────────────────────────────────
 
 @router.get(
     "/{solicitud_id}/historial",

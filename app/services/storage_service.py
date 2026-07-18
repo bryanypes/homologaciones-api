@@ -1,11 +1,3 @@
-"""
-storage_service.py — Abstracción de almacenamiento de archivos.
-
-Si R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY / R2_BUCKET_NAME
-están configurados, usa Cloudflare R2 (compatible con S3).
-Si no, guarda en disco local (útil para desarrollo y tests).
-"""
-
 import asyncio
 import logging
 import os
@@ -37,7 +29,6 @@ def _cliente_r2():
 
 
 async def subir(contenido: bytes, key: str, content_type: str = "application/pdf") -> str:
-    """Sube un archivo y retorna la key (identificador para luego descargar/eliminar)."""
     if _r2_habilitado():
         def _upload():
             _cliente_r2().put_object(
@@ -60,7 +51,6 @@ async def subir(contenido: bytes, key: str, content_type: str = "application/pdf
 
 
 async def descargar(key: str) -> bytes:
-    """Descarga un archivo por su key y retorna los bytes."""
     if _r2_habilitado():
         def _download():
             resp = _cliente_r2().get_object(Bucket=settings.R2_BUCKET_NAME, Key=key)
@@ -77,7 +67,6 @@ async def descargar(key: str) -> bytes:
 
 
 async def eliminar(key: str) -> None:
-    """Elimina un archivo por su key."""
     if _r2_habilitado():
         def _delete():
             _cliente_r2().delete_object(Bucket=settings.R2_BUCKET_NAME, Key=key)
@@ -92,11 +81,8 @@ async def eliminar(key: str) -> None:
 
 
 async def obtener_ruta_local(key: str) -> str:
-    """
-    Retorna una ruta de archivo local usable por operaciones síncronas (ej: extracción de PDF).
-    Si usa R2, descarga el archivo a un temporal. Si usa disco local, retorna la ruta directa.
-    El caller debe llamar liberar_ruta_local() cuando termine.
-    """
+    # Si usa R2, descarga a un temp para que el procesador de PDF pueda leerlo en modo síncrono.
+    # Llamar liberar_ruta_local() cuando termine.
     if _r2_habilitado():
         contenido = await descargar(key)
         ext = os.path.splitext(key)[1] or ".pdf"
@@ -109,7 +95,6 @@ async def obtener_ruta_local(key: str) -> str:
 
 
 def liberar_ruta_local(ruta: str) -> None:
-    """Elimina el temporal creado por obtener_ruta_local() si fue R2."""
     if _r2_habilitado():
         try:
             os.remove(ruta)

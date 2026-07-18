@@ -5,7 +5,6 @@ from app.models.documento import TipoDocumento
 from typing import Optional
 
 class DocumentoResponse(BaseModel):
-    """Respuesta con información del documento incluyendo URL"""
     id: UUID
     solicitud_id: UUID
     tipo: TipoDocumento

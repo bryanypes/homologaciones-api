@@ -35,15 +35,9 @@ class Settings(BaseSettings):
     MAX_FILE_SIZE_MB: int = 10
     BASE_URL: str = "http://localhost:8000"  # URL base para generar links de documentos
 
-    # Email — Resend (HTTP API, recomendado para Render)
-    RESEND_API_KEY: Optional[str] = None
+    # Email — Brevo (https://brevo.com, 300 correos/día gratis)
+    BREVO_API_KEY: Optional[str] = None
     EMAIL_FROM: Optional[str] = None
-
-    # Email SMTP (alternativa local/dev)
-    SMTP_HOST: Optional[str] = None
-    SMTP_PORT: int = 587
-    SMTP_USER: Optional[str] = None
-    SMTP_PASSWORD: Optional[str] = None
 
     # Cloudflare R2 (opcional — si no se configura, usa disco local)
     R2_ACCOUNT_ID: Optional[str] = None

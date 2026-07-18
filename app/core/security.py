@@ -29,19 +29,16 @@ def decode_access_token(token: str) -> Optional[dict]:
 
 
 def generar_reset_token() -> str:
-    """Genera un token seguro para recuperación de contraseña"""
     return secrets.token_urlsafe(32)
 
 
 def crear_reset_token_con_expiracion() -> tuple[str, datetime]:
-    """Crea un token de reset y su fecha de expiración"""
     token = generar_reset_token()
     expira = datetime.utcnow() + timedelta(minutes=settings.RESET_PASSWORD_TOKEN_EXPIRE_MINUTES)
     return token, expira
 
 
 def verificar_reset_token_vigente(reset_token_expira: Optional[datetime]) -> bool:
-    """Verifica si el token de reset aún es válido"""
     if not reset_token_expira:
         return False
     return datetime.utcnow() < reset_token_expira

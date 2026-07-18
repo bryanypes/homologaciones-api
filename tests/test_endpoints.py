@@ -4,25 +4,16 @@ from unittest.mock import AsyncMock, patch, MagicMock
 from uuid import uuid4
 import io
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Helpers
-# ──────────────────────────────────────────────────────────────────────────────
-
 def fake_pdf() -> bytes:
-    """PDF mínimo válido para tests."""
     return b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\nxref\n0 1\n0000000000 65535 f\ntrailer\n<< /Size 1 /Root 1 0 R >>\nstartxref\n9\n%%EOF"
 
-
 async def _registrar_estudiante(client: AsyncClient, email: str) -> str:
-    """Registra un estudiante y retorna su token."""
     await client.post("/api/v1/auth/register", json={
         "nombre": "Test", "apellido": "User",
         "email": email, "password": "123456", "rol": "estudiante"
     })
     r = await client.post("/api/v1/auth/login", json={"email": email, "password": "123456"})
     return r.json()["access_token"]
-
 
 async def _login_rector(client: AsyncClient) -> str:
     r = await client.post("/api/v1/auth/login", json={
@@ -31,24 +22,19 @@ async def _login_rector(client: AsyncClient) -> str:
     assert r.status_code == 200, "El seed del rector no corrió"
     return r.json()["access_token"]
 
-
 async def _crear_coordinador_y_login(client: AsyncClient, token_rector: str, email: str) -> str:
     await client.post("/api/v1/usuarios/", headers={"Authorization": f"Bearer {token_rector}"},
         json={"nombre": "Coord", "apellido": "Test", "email": email, "password": "Coord2024!", "rol": "coordinador"})
     r = await client.post("/api/v1/auth/login", json={"email": email, "password": "Coord2024!"})
     return r.json()["access_token"]
 
-
 async def _obtener_opciones_instituciones(client: AsyncClient, token: str) -> list:
-    """Obtiene la lista de instituciones disponibles"""
     r = await client.get("/api/v1/solicitudes/opciones/instituciones",
         headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 200
     return r.json()
 
-
 async def _obtener_opciones_programas(client: AsyncClient, token: str, institucion_id: str = None) -> list:
-    """Obtiene la lista de programas disponibles"""
     url = "/api/v1/solicitudes/opciones/programas"
     if institucion_id:
         url += f"?institucion_id={institucion_id}"
@@ -56,10 +42,8 @@ async def _obtener_opciones_programas(client: AsyncClient, token: str, instituci
     assert r.status_code == 200
     return r.json()
 
-
-async def _crear_solicitud_con_catalogo(client: AsyncClient, token: str, 
+async def _crear_solicitud_con_catalogo(client: AsyncClient, token: str,
                                         programa_origen_id: str, programa_destino_id: str) -> str:
-    """Crea solicitud eligiendo programas del catálogo"""
     r = await client.post("/api/v1/solicitudes/",
         headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
         json={
@@ -72,9 +56,7 @@ async def _crear_solicitud_con_catalogo(client: AsyncClient, token: str,
     assert r.status_code == 201
     return r.json()["id"]
 
-
 async def _crear_solicitud_texto_libre(client: AsyncClient, token: str) -> str:
-    """Crea solicitud escribiendo texto libre (Otra)"""
     r = await client.post("/api/v1/solicitudes/",
         headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
         json={
@@ -89,9 +71,7 @@ async def _crear_solicitud_texto_libre(client: AsyncClient, token: str) -> str:
     assert r.status_code == 201
     return r.json()["id"]
 
-
 async def _subir_notas(client: AsyncClient, token: str, solicitud_id: str) -> dict:
-    """Sube notas y retorna la respuesta con URL"""
     r = await client.post(
         f"/api/v1/documentos/{solicitud_id}/notas",
         headers={"Authorization": f"Bearer {token}"},
@@ -100,9 +80,7 @@ async def _subir_notas(client: AsyncClient, token: str, solicitud_id: str) -> di
     assert r.status_code == 201
     return r.json()
 
-
 async def _subir_pensum_destino(client: AsyncClient, token: str, solicitud_id: str) -> dict:
-    """Sube pensum destino y retorna la respuesta con URL"""
     r = await client.post(
         f"/api/v1/documentos/{solicitud_id}/pensum-destino",
         headers={"Authorization": f"Bearer {token}"},
@@ -110,11 +88,6 @@ async def _subir_pensum_destino(client: AsyncClient, token: str, solicitud_id: s
     )
     assert r.status_code == 201
     return r.json()
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Auth
-# ──────────────────────────────────────────────────────────────────────────────
 
 class TestAuth:
 
@@ -185,15 +158,9 @@ class TestAuth:
         r = await client.get("/api/v1/auth/me", headers={"Authorization": "Bearer falso_xyz"})
         assert r.status_code == 401
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Perfil de Usuario y Recuperación de Contraseña
-# ──────────────────────────────────────────────────────────────────────────────
-
 class TestPerfilUsuario:
 
     async def test_obtener_mi_perfil(self, client: AsyncClient):
-        """Test: GET /usuarios/perfil/mio"""
         email = f"perfil_{uuid4().hex[:6]}@test.com"
         token = await _registrar_estudiante(client, email)
         r = await client.get("/api/v1/usuarios/perfil/mio",
@@ -205,7 +172,6 @@ class TestPerfilUsuario:
         assert data["rol"] == "estudiante"
 
     async def test_editar_nombre_y_apellido(self, client: AsyncClient):
-        """Test: PATCH /usuarios/perfil/mio - Editar nombre/apellido"""
         email = f"edit_{uuid4().hex[:6]}@test.com"
         token = await _registrar_estudiante(client, email)
         r = await client.patch("/api/v1/usuarios/perfil/mio",
@@ -217,7 +183,6 @@ class TestPerfilUsuario:
         assert data["apellido"] == "García"
 
     async def test_cambiar_contraseña_requiere_actual(self, client: AsyncClient):
-        """Test: PATCH /usuarios/perfil/mio - Sin contraseña actual falla"""
         email = f"pwd_{uuid4().hex[:6]}@test.com"
         token = await _registrar_estudiante(client, email)
         r = await client.patch("/api/v1/usuarios/perfil/mio",
@@ -226,7 +191,6 @@ class TestPerfilUsuario:
         assert r.status_code == 400
 
     async def test_cambiar_contraseña_con_incorrecta_falla(self, client: AsyncClient):
-        """Test: PATCH /usuarios/perfil/mio - Contraseña actual incorrecta"""
         email = f"pwd2_{uuid4().hex[:6]}@test.com"
         token = await _registrar_estudiante(client, email)
         r = await client.patch("/api/v1/usuarios/perfil/mio",
@@ -235,7 +199,6 @@ class TestPerfilUsuario:
         assert r.status_code == 400
 
     async def test_cambiar_contraseña_ok(self, client: AsyncClient):
-        """Test: PATCH /usuarios/perfil/mio - Cambio de contraseña exitoso"""
         email = f"pwd3_{uuid4().hex[:6]}@test.com"
         token = await _registrar_estudiante(client, email)
         
@@ -249,7 +212,6 @@ class TestPerfilUsuario:
         assert r_login.status_code == 200
 
     async def test_cambiar_contraseña_vieja_no_funciona(self, client: AsyncClient):
-        """Test: PATCH /usuarios/perfil/mio - Contraseña vieja no funciona después de cambiar"""
         email = f"pwd4_{uuid4().hex[:6]}@test.com"
         token = await _registrar_estudiante(client, email)
         
@@ -261,11 +223,9 @@ class TestPerfilUsuario:
             json={"email": email, "password": "123456"})
         assert r.status_code == 401
 
-
 class TestRecuperacionContraseña:
 
     async def test_solicitar_recuperacion_ok(self, client: AsyncClient):
-        """Test: POST /usuarios/recuperacion/solicitar"""
         email = f"rec_{uuid4().hex[:6]}@test.com"
         await _registrar_estudiante(client, email)
         
@@ -275,48 +235,35 @@ class TestRecuperacionContraseña:
         assert "mensaje" in r.json()
 
     async def test_solicitar_recuperacion_email_no_existe(self, client: AsyncClient):
-        """Test: POST /usuarios/recuperacion/solicitar - Email no existe (no expone)"""
         r = await client.post("/api/v1/usuarios/recuperacion/solicitar",
             json={"email": "no_existe@test.com"})
         assert r.status_code == 200
         assert "mensaje" in r.json()
 
     async def test_solicitar_recuperacion_envia_email(self, client: AsyncClient):
-        """Test: POST /usuarios/recuperacion/solicitar - Genera token"""
         email = f"rec2_{uuid4().hex[:6]}@test.com"
         await _registrar_estudiante(client, email)
         
-        # Simplemente verificar que el endpoint funciona
-        # El email se envía en background, no podemos mockearlo fácilmente
         r = await client.post("/api/v1/usuarios/recuperacion/solicitar",
             json={"email": email})
         assert r.status_code == 200
 
     async def test_restablecer_contraseña_sin_token_falla(self, client: AsyncClient):
-        """Test: POST /usuarios/recuperacion/restablecer - Token inválido"""
         r = await client.post("/api/v1/usuarios/recuperacion/restablecer",
             json={"token": "token_falso_xyz", "password_nueva": "nueva_pwd"})
         assert r.status_code == 400
 
     async def test_flujo_recuperacion_sin_bd_access(self, client: AsyncClient):
-        """Test: Verificar que endpoints de recovery existen"""
         email = f"flujo_{uuid4().hex[:6]}@test.com"
         await _registrar_estudiante(client, email)
         
-        # 1. Solicitar recuperación
         r1 = await client.post("/api/v1/usuarios/recuperacion/solicitar",
             json={"email": email})
         assert r1.status_code == 200
         
-        # 2. Intentar restablecer con token fake (debe fallar)
         r2 = await client.post("/api/v1/usuarios/recuperacion/restablecer",
             json={"token": "token_invalido_xyz", "password_nueva": "nueva_pwd"})
         assert r2.status_code == 400
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Control de acceso por rol
-# ──────────────────────────────────────────────────────────────────────────────
 
 class TestControlAcceso:
 
@@ -359,15 +306,9 @@ class TestControlAcceso:
             headers={"Authorization": f"Bearer {token_e2}"})
         assert r.status_code == 403
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Solicitudes
-# ──────────────────────────────────────────────────────────────────────────────
-
 class TestSolicitudes:
 
     async def test_crear_solicitud_con_texto_libre(self, client: AsyncClient):
-        """Test: POST /solicitudes/ - Crear con opción 'Otra' (texto libre)"""
         token = await _registrar_estudiante(client, f"e_{uuid4().hex[:6]}@test.com")
         
         sol_id = await _crear_solicitud_texto_libre(client, token)
@@ -381,7 +322,6 @@ class TestSolicitudes:
         assert data["programa_origen"] == "Ingeniería Informática"
 
     async def test_crear_solicitud_sin_programas_falla(self, client: AsyncClient):
-        """Test: POST /solicitudes/ - Falla si no proporciona programas"""
         token = await _registrar_estudiante(client, f"e_{uuid4().hex[:6]}@test.com")
         
         r = await client.post("/api/v1/solicitudes/",
@@ -394,7 +334,6 @@ class TestSolicitudes:
         assert r.status_code == 400
 
     async def test_paginacion_estructura(self, client: AsyncClient):
-        """Test: GET /solicitudes/ - Paginación"""
         token_r = await _login_rector(client)
         r = await client.get("/api/v1/solicitudes/?page=1&size=5",
             headers={"Authorization": f"Bearer {token_r}"})
@@ -406,7 +345,6 @@ class TestSolicitudes:
         assert "items" in body
 
     async def test_filtro_por_estado(self, client: AsyncClient):
-        """Test: GET /solicitudes/?estado=... - Filtro"""
         token_r = await _login_rector(client)
         r = await client.get("/api/v1/solicitudes/?estado=borrador",
             headers={"Authorization": f"Bearer {token_r}"})
@@ -414,15 +352,9 @@ class TestSolicitudes:
         for item in r.json()["items"]:
             assert item["estado"] == "borrador"
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Documentos
-# ──────────────────────────────────────────────────────────────────────────────
-
 class TestDocumentos:
 
     async def test_subir_notas_ok(self, client: AsyncClient):
-        """Test: POST /documentos/{id}/notas - Subir notas"""
         token = await _registrar_estudiante(client, f"e_{uuid4().hex[:6]}@test.com")
         sol_id = await _crear_solicitud_texto_libre(client, token)
         
@@ -431,7 +363,6 @@ class TestDocumentos:
         assert "url" in doc
 
     async def test_subir_notas_devuelve_url(self, client: AsyncClient):
-        """Test: POST /documentos/{id}/notas - Devuelve URL"""
         token = await _registrar_estudiante(client, f"e_{uuid4().hex[:6]}@test.com")
         sol_id = await _crear_solicitud_texto_libre(client, token)
         
@@ -443,7 +374,6 @@ class TestDocumentos:
         assert "descargar" in doc["url"]
 
     async def test_listar_documentos_con_urls(self, client: AsyncClient):
-        """Test: GET /documentos/{solicitud_id} - Lista con URLs"""
         token = await _registrar_estudiante(client, f"e_{uuid4().hex[:6]}@test.com")
         sol_id = await _crear_solicitud_texto_libre(client, token)
         
@@ -460,13 +390,11 @@ class TestDocumentos:
             assert "descargar" in doc["url"]
 
     async def test_descargar_documento(self, client: AsyncClient):
-        """Test: GET /documentos/{solicitud_id}/{doc_id}/descargar"""
         token = await _registrar_estudiante(client, f"e_{uuid4().hex[:6]}@test.com")
         sol_id = await _crear_solicitud_texto_libre(client, token)
         
         doc = await _subir_notas(client, token, sol_id)
         
-        # Descargar usando el doc_id
         r = await client.get(
             f"/api/v1/documentos/{sol_id}/{doc['id']}/descargar",
             headers={"Authorization": f"Bearer {token}"})
@@ -474,7 +402,6 @@ class TestDocumentos:
         assert r.headers["content-type"] == "application/pdf"
 
     async def test_subir_notas_no_pdf_falla(self, client: AsyncClient):
-        """Test: POST /documentos/{id}/notas - Rechaza no-PDF"""
         token = await _registrar_estudiante(client, f"e_{uuid4().hex[:6]}@test.com")
         sol_id = await _crear_solicitud_texto_libre(client, token)
         
@@ -484,7 +411,6 @@ class TestDocumentos:
         assert r.status_code == 400
 
     async def test_multiples_notas_crea_documentos_distintos(self, client: AsyncClient):
-        """Test: POST /documentos/{id}/notas - Cada subida crea un documento nuevo"""
         token = await _registrar_estudiante(client, f"e_{uuid4().hex[:6]}@test.com")
         sol_id = await _crear_solicitud_texto_libre(client, token)
 
@@ -494,11 +420,6 @@ class TestDocumentos:
         assert doc1["id"] != doc2["id"]
         assert doc1["tipo"] == "pensum_origen"
         assert doc2["tipo"] == "pensum_origen"
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Usuarios CRUD
-# ──────────────────────────────────────────────────────────────────────────────
 
 class TestUsuarios:
 
@@ -559,16 +480,11 @@ class TestUsuarios:
         for u in r.json()["items"]:
             assert u["rol"] == "estudiante"
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Email service
-# ──────────────────────────────────────────────────────────────────────────────
-
 class TestEmailService:
 
     @patch("app.services.email_service.settings")
     async def test_no_falla_sin_api_key(self, mock_settings):
-        mock_settings.RESEND_API_KEY = None
+        mock_settings.BREVO_API_KEY = None
         from app.services.email_service import notificar_cambio_estado
         await notificar_cambio_estado(
             email_estudiante="test@test.com",
@@ -578,12 +494,15 @@ class TestEmailService:
             estado_nuevo="enviada",
         )
 
-    @patch("app.services.email_service.resend")
+    @patch("app.services.email_service.httpx")
     @patch("app.services.email_service.settings")
-    async def test_envia_con_resend_configurado(self, mock_settings, mock_resend):
-        mock_settings.RESEND_API_KEY = "re_test_key"
+    async def test_envia_con_brevo_configurado(self, mock_settings, mock_httpx):
+        mock_settings.BREVO_API_KEY = "xkeysib-test"
         mock_settings.EMAIL_FROM = "test@test.com"
-        mock_resend.Emails.send = MagicMock(return_value={"id": "abc123"})
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=MagicMock(raise_for_status=MagicMock()))
+        mock_httpx.AsyncClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_httpx.AsyncClient.return_value.__aexit__ = AsyncMock(return_value=False)
         from app.services.email_service import notificar_cambio_estado
         await notificar_cambio_estado(
             email_estudiante="estudiante@test.com",
@@ -592,19 +511,21 @@ class TestEmailService:
             estado_anterior="borrador",
             estado_nuevo="enviada",
         )
-        mock_resend.Emails.send.assert_called_once()
+        mock_client.post.assert_called_once()
 
-    @patch("app.services.email_service.resend")
+    @patch("app.services.email_service.httpx")
     @patch("app.services.email_service.settings")
-    async def test_enviar_recuperacion_contraseña(self, mock_settings, mock_resend):
-        """Test: Enviar email de recuperación de contraseña"""
-        mock_settings.RESEND_API_KEY = "re_test_key"
+    async def test_enviar_recuperacion_contraseña(self, mock_settings, mock_httpx):
+        mock_settings.BREVO_API_KEY = "xkeysib-test"
         mock_settings.EMAIL_FROM = "test@test.com"
-        mock_resend.Emails.send = MagicMock(return_value={"id": "abc123"})
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=MagicMock(raise_for_status=MagicMock()))
+        mock_httpx.AsyncClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_httpx.AsyncClient.return_value.__aexit__ = AsyncMock(return_value=False)
         from app.services.email_service import enviar_recuperacion_contraseña
         await enviar_recuperacion_contraseña(
             email_usuario="usuario@test.com",
             nombre_usuario="Carlos García",
             token="token_seguro_xyz",
         )
-        mock_resend.Emails.send.assert_called_once()
+        mock_client.post.assert_called_once()
