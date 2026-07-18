@@ -151,9 +151,6 @@ async def editar_mi_perfil(
     db: AsyncSession = Depends(get_db),
     usuario: Usuario = Depends(get_current_user),
 ):
-    """El usuario edita su propio perfil"""
-    
-    # Si cambia contraseña, verificar que proporcione la actual
     if data.password_nueva:
         if not data.password_actual:
             raise HTTPException(
@@ -251,25 +248,19 @@ async def solicitar_recuperacion(
     data: SolicitarRecuperacionRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    """Envía token de recuperación de contraseña al email"""
-    
     result = await db.execute(select(Usuario).where(Usuario.email == data.email))
     usuario = result.scalar_one_or_none()
-    
+
     if not usuario:
-        # Por seguridad, no revelar si el email existe o no
-        # Pero sí enviar la respuesta exitosa
         return RecuperacionResponse(
             mensaje="Si el correo está registrado, recibirás un enlace de recuperación"
         )
-    
-    # Generar token de reset
+
     token, expira = crear_reset_token_con_expiracion()
     usuario.reset_token = token
     usuario.reset_token_expira = expira
     await db.commit()
-    
-    # Enviar email (asíncrono, sin esperar)
+
     try:
         await enviar_recuperacion_contraseña(
             email_usuario=usuario.email,
@@ -277,7 +268,6 @@ async def solicitar_recuperacion(
             token=token,
         )
     except Exception as e:
-        # Log del error pero no fallar la respuesta
         print(f"Error enviando email de recuperación: {e}")
     
     return RecuperacionResponse(
@@ -303,30 +293,25 @@ async def restablecer_contraseña(
     data: RestablecerContraseñaRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    """Restablecer contraseña con token de recuperación"""
-    
-    # Buscar usuario con ese token
     result = await db.execute(
         select(Usuario).where(Usuario.reset_token == data.token)
     )
     usuario = result.scalar_one_or_none()
-    
+
     if not usuario:
         raise HTTPException(
             status_code=400,
             detail="Token inválido o expirado"
         )
-    
-    # Verificar que el token no esté expirado
+
     if not verificar_reset_token_vigente(usuario.reset_token_expira):
         raise HTTPException(
             status_code=400,
             detail="Token expirado. Solicita un nuevo enlace de recuperación"
         )
-    
-    # Cambiar contraseña
+
     usuario.password_hash = hash_password(data.password_nueva)
-    usuario.reset_token = None  # Limpiar token
+    usuario.reset_token = None
     usuario.reset_token_expira = None
     await db.commit()
     await db.refresh(usuario)

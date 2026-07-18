@@ -63,7 +63,6 @@ async def register(data: UsuarioCreate, db: AsyncSession = Depends(get_db)):
     "/login",
     response_model=TokenResponse,
     summary="Iniciar sesión",
-    description="Autentica al usuario y retorna un token JWT.",
     responses={
         200: {"description": "Login exitoso, retorna JWT"},
         401: {"description": "Credenciales inválidas"},
@@ -88,7 +87,6 @@ async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
     "/logout",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Cerrar sesión",
-    description="Invalida el token JWT actual agregándolo a una blacklist en Redis.",
 )
 async def logout(
     usuario: Usuario = Depends(get_current_user),
@@ -104,7 +102,6 @@ async def logout(
     "/me",
     response_model=UsuarioResponse,
     summary="Perfil del usuario",
-    description="Retorna los datos del usuario autenticado.",
 )
 async def me(usuario: Usuario = Depends(get_current_user)):
     return usuario
@@ -114,7 +111,6 @@ async def me(usuario: Usuario = Depends(get_current_user)):
     "/me",
     response_model=UsuarioResponse,
     summary="Actualizar perfil",
-    description="Permite al usuario actualizar su nombre, apellido o contraseña.",
 )
 async def actualizar_perfil(
     data: UsuarioUpdate,

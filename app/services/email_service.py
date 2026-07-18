@@ -1,43 +1,158 @@
+import base64
 import logging
+import os
+from functools import lru_cache
 from typing import Optional
 
-import resend
+import httpx
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Mapa de estados a descripciones legibles en español
 ESTADO_LABELS = {
-    "borrador": "Borrador",
-    "enviada": "Enviada — en espera de revisión",
-    "en_revision": "En revisión por coordinador",
-    "procesando_ia": "Procesando con inteligencia artificial",
-    "pendiente_rector": "Pendiente de aprobación por vicerrectoría",
-    "aprobada": "Aprobada ✓",
-    "rechazada": "Rechazada",
+    "borrador":             "Borrador",
+    "enviada":              "Enviada",
+    "en_revision":          "En revisión",
+    "revision_coordinador": "Revisión del coordinador",
+    "procesando_ia":        "Procesando con IA",
+    "pendiente_rector":     "Pendiente del vicerrector",
+    "aprobada":             "Aprobada",
+    "rechazada":            "Rechazada",
 }
 
-# ──────────────────────────────────────────────────────────────
-# Plantillas HTML
-# ──────────────────────────────────────────────────────────────
+_BADGE = {
+    "aprobada":             "background:#E8F4E9;color:#3F7D45",
+    "rechazada":            "background:#FAE8E6;color:#B33B2E",
+    "pendiente_rector":     "background:#E6EBF3;color:#053686",
+    "revision_coordinador": "background:#F2F0E8;color:#4B4B49",
+    "en_revision":          "background:#F2F0E8;color:#4B4B49",
+    "procesando_ia":        "background:#FEFCF4;color:#C1AB1F",
+    "enviada":              "background:#E6EBF3;color:#053686",
+    "borrador":             "background:#F2F0E8;color:#6D6C69",
+}
 
-_BASE_STYLE = """
-    body { font-family: Arial, sans-serif; background: #f4f4f4; margin: 0; padding: 0; }
-    .container { max-width: 600px; margin: 40px auto; background: #fff;
-                 border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,.1); }
-    .header { background: #003366; color: #fff; padding: 24px 32px; }
-    .header h1 { margin: 0; font-size: 20px; }
-    .body { padding: 32px; color: #333; line-height: 1.6; }
-    .estado-badge { display: inline-block; background: #e8f0fe; color: #1a56db;
-                    padding: 6px 16px; border-radius: 20px; font-weight: bold; margin: 12px 0; }
-    .footer { background: #f9f9f9; padding: 16px 32px; font-size: 12px; color: #888;
-              border-top: 1px solid #eee; }
-    .btn { display: inline-block; background: #003366; color: #fff; padding: 12px 24px;
-           border-radius: 4px; text-decoration: none; margin-top: 16px; }
-    .code-box { background: #f0f0f0; padding: 12px; border-radius: 4px; 
-                font-family: monospace; word-break: break-all; margin: 12px 0; }
+# Qué mascota usar según el estado de la solicitud
+_MASCOTA_ESTADO = {
+    "aprobada":             "Iaaprobada.png",
+    "rechazada":            "Iaerror.png",
+    "procesando_ia":        "Iapensando.png",
+    "pendiente_rector":     "Iapensando.png",
+    "en_revision":          "Iapensando.png",
+    "revision_coordinador": "Iapensando.png",
+    "enviada":              "IAsaludando.png",
+    "borrador":             "IAsaludando.png",
+}
+
+_TEMPLATES_DIR = os.path.normpath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "templates")
+)
+
+
+@lru_cache(maxsize=16)
+def _img(nombre: str) -> str:
+    try:
+        with open(os.path.join(_TEMPLATES_DIR, nombre), "rb") as f:
+            b64 = base64.b64encode(f.read()).decode()
+        return f"data:image/png;base64,{b64}"
+    except FileNotFoundError:
+        return ""
+
+
+_CSS = """
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:#FFFDF5;
+    font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{padding:40px 16px;background:#FFFDF5}
+  .card{
+    max-width:560px;margin:0 auto;background:#fff;
+    border-radius:16px;overflow:hidden;
+    box-shadow:0 4px 32px rgba(5,54,134,.09);
+  }
+  .hdr{background:#053686;padding:24px 32px}
+  .hdr-row{display:flex;align-items:center;gap:12px}
+  .hdr-logo{width:36px;height:36px;flex-shrink:0}
+  .hdr-logo img{width:100%;height:100%;object-fit:contain}
+  .hdr-name{color:#fff;font-size:18px;font-weight:600;letter-spacing:-.2px}
+  .mascot{background:#F3F5F9;padding:24px;text-align:center}
+  .mascot img{height:88px;width:auto}
+  .body{padding:32px}
+  .greeting{font-size:16px;font-weight:600;color:#1E1E1E;margin-bottom:12px}
+  .text{font-size:14px;color:#4B4B49;line-height:1.65}
+  .mt{margin-top:12px}
+  .badge{
+    display:inline-block;margin:20px 0;
+    padding:7px 18px;border-radius:100px;
+    font-size:13px;font-weight:500;
+  }
+  .obs{
+    margin-top:16px;padding:12px 16px;
+    background:#FEFCF4;border:1px solid #F5ECB2;
+    border-radius:10px;font-size:14px;color:#4B4B49;
+  }
+  .id-box{
+    margin-top:20px;padding:12px 16px;
+    background:#F3F5F9;border-radius:10px;
+    border-left:3px solid #053686;
+    font-size:12px;color:#6D6C69;
+  }
+  .id-box code{font-family:'Courier New',monospace;color:#053686;font-weight:600}
+  .code-box{
+    margin:16px 0;padding:18px;background:#F3F5F9;
+    border-radius:12px;font-family:'Courier New',monospace;
+    font-size:18px;font-weight:700;color:#053686;
+    letter-spacing:3px;text-align:center;word-break:break-all;
+  }
+  .btn{
+    display:inline-block;margin-top:20px;
+    padding:12px 24px;background:#053686;color:#fff;
+    text-decoration:none;border-radius:12px;
+    font-size:14px;font-weight:500;
+  }
+  .footer{
+    background:#F2F0E8;border-top:1px solid #E4E2DB;
+    padding:16px 32px;font-size:11px;color:#8F8E8A;
+    text-align:center;line-height:1.6;
+  }
 """
+
+
+def _email(body_html: str, mascota: str = "IAsaludando.png") -> str:
+    logo_src = _img("LOGO.png")
+    mascota_src = _img(mascota)
+    logo_tag = f'<img src="{logo_src}" alt="HomologaIA" />' if logo_src else ""
+    mascota_tag = f'<img src="{mascota_src}" alt="" />' if mascota_src else ""
+    return f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>{_CSS}</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <div class="hdr">
+      <div class="hdr-row">
+        <div class="hdr-logo">{logo_tag}</div>
+        <span class="hdr-name">HomologaIA</span>
+      </div>
+    </div>
+    <div class="mascot">{mascota_tag}</div>
+    <div class="body">
+{body_html}
+    </div>
+    <div class="footer">
+      Mensaje automático · HomologaIA · Corporación Universitaria Autónoma del Cauca<br>
+      Por favor no responda directamente a este correo.
+    </div>
+  </div>
+</div>
+</body>
+</html>"""
 
 
 def _html_cambio_estado(
@@ -47,73 +162,31 @@ def _html_cambio_estado(
     estado_nuevo: str,
     observacion: Optional[str],
 ) -> str:
-    label_nuevo = ESTADO_LABELS.get(estado_nuevo, estado_nuevo)
-    label_anterior = ESTADO_LABELS.get(estado_anterior, estado_anterior)
+    label = ESTADO_LABELS.get(estado_nuevo, estado_nuevo)
+    label_ant = ESTADO_LABELS.get(estado_anterior, estado_anterior)
+    badge = _BADGE.get(estado_nuevo, "background:#E6EBF3;color:#053686")
+    obs = f'<div class="obs"><strong>Observación:</strong> {observacion}</div>' if observacion else ""
+    mascota = _MASCOTA_ESTADO.get(estado_nuevo, "IAsaludando.png")
 
-    obs_html = (
-        f"<p><strong>Observación:</strong> {observacion}</p>"
-        if observacion
-        else ""
-    )
-
-    aprobada = estado_nuevo == "aprobada"
-    rechazada = estado_nuevo == "rechazada"
-    color_badge = "#d4edda" if aprobada else ("#f8d7da" if rechazada else "#e8f0fe")
-    color_text = "#155724" if aprobada else ("#721c24" if rechazada else "#1a56db")
-
-    return f"""
-    <!DOCTYPE html><html><head><meta charset="utf-8">
-    <style>{_BASE_STYLE}
-    .estado-badge {{ background: {color_badge}; color: {color_text}; }}
-    </style></head><body>
-    <div class="container">
-      <div class="header">
-        <h1>Sistema de Homologaciones — Universidad del Cauca</h1>
-      </div>
-      <div class="body">
-        <p>Estimado/a <strong>{nombre_estudiante}</strong>,</p>
-        <p>Su solicitud de homologación ha cambiado de estado:</p>
-        <p>Estado anterior: <em>{label_anterior}</em></p>
-        <p>Estado actual:</p>
-        <span class="estado-badge">{label_nuevo}</span>
-        {obs_html}
-        <p>Puede consultar el detalle de su solicitud en el sistema.</p>
-        <p><strong>ID de solicitud:</strong> <code>{solicitud_id}</code></p>
-      </div>
-      <div class="footer">
-        Este es un mensaje automático. Por favor no responda a este correo.
-        Sistema de Homologaciones — Oficina de Registro y Control Académico.
-      </div>
-    </div>
-    </body></html>
-    """
+    body = f"""      <p class="greeting">Hola, {nombre_estudiante}</p>
+      <p class="text">Tu solicitud de homologación ha cambiado de estado.</p>
+      <p class="text mt">Estado anterior: <strong>{label_ant}</strong></p>
+      <p class="text">Nuevo estado:</p>
+      <span class="badge" style="{badge}">{label}</span>
+      {obs}
+      <div class="id-box">Solicitud: <code>{solicitud_id}</code></div>"""
+    return _email(body, mascota)
 
 
-def _html_homologacion_completada(
-    nombre_estudiante: str,
-    solicitud_id: str,
-) -> str:
-    return f"""
-    <!DOCTYPE html><html><head><meta charset="utf-8">
-    <style>{_BASE_STYLE}</style></head><body>
-    <div class="container">
-      <div class="header">
-        <h1>Sistema de Homologaciones — Universidad del Cauca</h1>
-      </div>
-      <div class="body">
-        <p>Estimado/a <strong>{nombre_estudiante}</strong>,</p>
-        <p>El análisis de inteligencia artificial de su solicitud ha finalizado exitosamente.</p>
-        <span class="estado-badge">Pendiente de aprobación por vicerrectoría</span>
-        <p>El resultado ha sido enviado al vicerrector académico para su revisión y aprobación final.
-           Le notificaremos cuando haya una decisión.</p>
-        <p><strong>ID de solicitud:</strong> <code>{solicitud_id}</code></p>
-      </div>
-      <div class="footer">
-        Este es un mensaje automático. Por favor no responda a este correo.
-      </div>
-    </div>
-    </body></html>
-    """
+def _html_homologacion_completada(nombre_estudiante: str, solicitud_id: str) -> str:
+    badge = _BADGE["pendiente_rector"]
+    body = f"""      <p class="greeting">Hola, {nombre_estudiante}</p>
+      <p class="text">El análisis de inteligencia artificial de tu solicitud ha finalizado.</p>
+      <span class="badge" style="{badge}">Pendiente del vicerrector</span>
+      <p class="text">El resultado fue enviado al vicerrector académico para revisión y aprobación final.<br>
+      Te notificaremos cuando haya una decisión.</p>
+      <div class="id-box">Solicitud: <code>{solicitud_id}</code></div>"""
+    return _email(body, "Iapensando.png")
 
 
 def _html_recuperacion_contraseña(
@@ -121,36 +194,32 @@ def _html_recuperacion_contraseña(
     token: str,
     frontend_url: str = "http://localhost:3000",
 ) -> str:
-    """Plantilla HTML para recuperación de contraseña"""
     enlace = f"{frontend_url}/resetear-contraseña?token={token}"
-    
-    return f"""
-    <!DOCTYPE html><html><head><meta charset="utf-8">
-    <style>{_BASE_STYLE}</style></head><body>
-    <div class="container">
-      <div class="header">
-        <h1>Sistema de Homologaciones — Universidad del Cauca</h1>
-      </div>
-      <div class="body">
-        <p>Estimado/a <strong>{nombre_usuario}</strong>,</p>
-        <p>Recibimos una solicitud para restablecer tu contraseña. 
-           Si no la solicitaste, ignora este correo.</p>
-        
-        <p><strong>Tu token de recuperación:</strong></p>
-        <div class="code-box">{token}</div>
-        
-        <p>Este token es válido por 30 minutos. Accede a tu cuenta con el siguiente enlace:</p>
-        <a href="{enlace}" class="btn">Restablecer Contraseña</a>
-        
-        <p>O copia el token anterior en el formulario de recuperación si accedes directamente.</p>
-      </div>
-      <div class="footer">
-        Este es un mensaje automático. Por favor no responda a este correo.
-        Sistema de Homologaciones — Oficina de Registro y Control Académico.
-      </div>
-    </div>
-    </body></html>
-    """
+    body = f"""      <p class="greeting">Hola, {nombre_usuario}</p>
+      <p class="text">Recibimos una solicitud para restablecer tu contraseña. Si no la solicitaste, ignora este correo.</p>
+      <p class="text mt">Tu token de recuperación (válido 30 minutos):</p>
+      <div class="code-box">{token}</div>
+      <p class="text">O accede directamente con el siguiente enlace:</p>
+      <a href="{enlace}" class="btn">Restablecer contraseña</a>"""
+    return _email(body, "IAseñalandoderecha.png")
+
+
+def _html_mercadeo_aprobada(
+    nombre_estudiante: str,
+    solicitud_id: str,
+    numero_resolucion: str,
+    programa_destino: str,
+    institucion_origen: str,
+) -> str:
+    badge = _BADGE["aprobada"]
+    body = f"""      <p class="greeting">Nueva homologación aprobada</p>
+      <span class="badge" style="{badge}">Resolución {numero_resolucion}</span>
+      <p class="text"><strong>Estudiante:</strong> {nombre_estudiante}</p>
+      <p class="text mt"><strong>Programa destino:</strong> {programa_destino}</p>
+      <p class="text"><strong>Institución de origen:</strong> {institucion_origen}</p>
+      <div class="id-box">Solicitud: <code>{solicitud_id}</code></div>
+      <p class="text mt">El estudiante puede iniciar su proceso de matrícula.</p>"""
+    return _email(body, "Iaaprobada.png")
 
 
 def _texto_plano_cambio_estado(
@@ -162,46 +231,40 @@ def _texto_plano_cambio_estado(
     label = ESTADO_LABELS.get(estado_nuevo, estado_nuevo)
     obs = f"\nObservación: {observacion}" if observacion else ""
     return (
-        f"Estimado/a {nombre_estudiante},\n\n"
-        f"Su solicitud de homologación (ID: {solicitud_id}) "
-        f"ha cambiado al estado: {label}.{obs}\n\n"
-        "Sistema de Homologaciones — Universidad del Cauca"
+        f"Hola, {nombre_estudiante}.\n\n"
+        f"Tu solicitud de homologación (ID: {solicitud_id}) "
+        f"cambió al estado: {label}.{obs}\n\n"
+        "HomologaIA — Corporación Universitaria Autónoma del Cauca"
     )
 
 
-def _texto_plano_recuperacion_contraseña(
-    nombre_usuario: str,
-    token: str,
-) -> str:
-    """Plantilla de texto plano para recuperación de contraseña"""
+def _texto_plano_recuperacion_contraseña(nombre_usuario: str, token: str) -> str:
     return (
-        f"Estimado/a {nombre_usuario},\n\n"
+        f"Hola, {nombre_usuario}.\n\n"
         f"Tu token de recuperación de contraseña es:\n{token}\n\n"
-        "Este token es válido por 30 minutos.\n\n"
-        "Sistema de Homologaciones — Universidad del Cauca"
+        "Válido por 30 minutos.\n\n"
+        "HomologaIA — Corporación Universitaria Autónoma del Cauca"
     )
 
-
-# ──────────────────────────────────────────────────────────────
-# Funciones de envío
-# ──────────────────────────────────────────────────────────────
 
 async def _enviar(destinatario: str, asunto: str, html: str, texto: str) -> None:
-    """Envía email via Resend HTTP API. Falla silenciosamente si no está configurado."""
-    if not settings.RESEND_API_KEY:
-        logger.warning("[Email] RESEND_API_KEY no configurada. Saltando envío a %s.", destinatario)
+    if not settings.BREVO_API_KEY:
+        logger.warning("[Email] BREVO_API_KEY no configurada. Saltando envío a %s.", destinatario)
         return
-
     try:
-        resend.api_key = settings.RESEND_API_KEY
-        email_from = settings.EMAIL_FROM or "Sistema Homologaciones <onboarding@resend.dev>"
-        resend.Emails.send({
-            "from": email_from,
-            "to": [destinatario],
-            "subject": asunto,
-            "html": html,
-            "text": texto,
-        })
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.post(
+                "https://api.brevo.com/v3/smtp/email",
+                headers={"api-key": settings.BREVO_API_KEY, "content-type": "application/json"},
+                json={
+                    "sender": {"name": "HomologaIA", "email": settings.EMAIL_FROM},
+                    "to": [{"email": destinatario}],
+                    "subject": asunto,
+                    "htmlContent": html,
+                    "textContent": texto,
+                },
+            )
+            r.raise_for_status()
         logger.info("[Email] Enviado a %s — %s", destinatario, asunto)
     except Exception as exc:
         logger.error("[Email] Error al enviar a %s: %s", destinatario, exc)
@@ -215,18 +278,10 @@ async def notificar_cambio_estado(
     estado_nuevo: str,
     observacion: Optional[str] = None,
 ) -> None:
-    """
-    Notifica al estudiante que su solicitud cambió de estado.
-    Llamar desde el worker de Kafka en handle_cambio_estado.
-    """
     label = ESTADO_LABELS.get(estado_nuevo, estado_nuevo)
-    asunto = f"[Homologaciones] Su solicitud cambió a: {label}"
-    html = _html_cambio_estado(
-        nombre_estudiante, solicitud_id, estado_anterior, estado_nuevo, observacion
-    )
-    texto = _texto_plano_cambio_estado(
-        nombre_estudiante, solicitud_id, estado_nuevo, observacion
-    )
+    asunto = f"[HomologaIA] Tu solicitud cambió a: {label}"
+    html = _html_cambio_estado(nombre_estudiante, solicitud_id, estado_anterior, estado_nuevo, observacion)
+    texto = _texto_plano_cambio_estado(nombre_estudiante, solicitud_id, estado_nuevo, observacion)
     await _enviar(email_estudiante, asunto, html, texto)
 
 
@@ -236,17 +291,13 @@ async def notificar_homologacion_completada(
     solicitud_id: str,
     tokens_utilizados: int,
 ) -> None:
-    """
-    Notifica al estudiante que el análisis IA finalizó y está pendiente del rector.
-    Llamar desde el worker de Kafka en handle_homologacion_completada.
-    """
-    asunto = "[Homologaciones] Análisis completado — Pendiente de aprobación"
+    asunto = "[HomologaIA] Análisis completado — Pendiente de aprobación"
     html = _html_homologacion_completada(nombre_estudiante, solicitud_id)
     texto = (
-        f"Estimado/a {nombre_estudiante},\n\n"
-        f"El análisis de su solicitud (ID: {solicitud_id}) ha finalizado. "
+        f"Hola, {nombre_estudiante}.\n\n"
+        f"El análisis de tu solicitud (ID: {solicitud_id}) ha finalizado. "
         "Está pendiente de aprobación por vicerrectoría.\n\n"
-        "Sistema de Homologaciones — Universidad del Cauca"
+        "HomologaIA — Corporación Universitaria Autónoma del Cauca"
     )
     await _enviar(email_estudiante, asunto, html, texto)
 
@@ -258,38 +309,15 @@ async def notificar_mercadeo_homologacion_aprobada(
     programa_destino: str,
     institucion_origen: str,
 ) -> None:
-    """
-    Notifica al área de mercadeo que una homologación fue aprobada.
-    El destinatario se configura con la variable MERCADEO_EMAIL.
-    """
     destinatario = settings.MERCADEO_EMAIL
     if not destinatario:
         logger.info("[Email] MERCADEO_EMAIL no configurado. Saltando notificación a mercadeo.")
         return
 
-    asunto = f"[Homologaciones] Aprobada — Resolución {numero_resolucion}"
-    html = f"""
-    <!DOCTYPE html><html><head><meta charset="utf-8">
-    <style>{_BASE_STYLE}</style></head><body>
-    <div class="container">
-      <div class="header">
-        <h1>Sistema de Homologaciones — Universidad del Cauca</h1>
-      </div>
-      <div class="body">
-        <p>Se ha aprobado una solicitud de homologación. Por favor tome nota de los datos para el proceso de matrícula:</p>
-        <p><strong>Estudiante:</strong> {nombre_estudiante}</p>
-        <p><strong>Programa destino:</strong> {programa_destino}</p>
-        <p><strong>Institución de origen:</strong> {institucion_origen}</p>
-        <span class="estado-badge" style="background:#d4edda;color:#155724;">Resolución {numero_resolucion} — APROBADA</span>
-        <p><strong>ID de solicitud:</strong> <code>{solicitud_id}</code></p>
-        <p>El estudiante puede iniciar su proceso de matrícula.</p>
-      </div>
-      <div class="footer">
-        Este es un mensaje automático del Sistema de Homologaciones.
-      </div>
-    </div>
-    </body></html>
-    """
+    asunto = f"[HomologaIA] Homologación aprobada — Resolución {numero_resolucion}"
+    html = _html_mercadeo_aprobada(
+        nombre_estudiante, solicitud_id, numero_resolucion, programa_destino, institucion_origen
+    )
     texto = (
         f"Homologación aprobada — Resolución {numero_resolucion}\n\n"
         f"Estudiante: {nombre_estudiante}\n"
@@ -297,7 +325,7 @@ async def notificar_mercadeo_homologacion_aprobada(
         f"Institución de origen: {institucion_origen}\n"
         f"ID solicitud: {solicitud_id}\n\n"
         "El estudiante puede iniciar su proceso de matrícula.\n\n"
-        "Sistema de Homologaciones — Universidad del Cauca"
+        "HomologaIA — Corporación Universitaria Autónoma del Cauca"
     )
     await _enviar(destinatario, asunto, html, texto)
 
@@ -308,10 +336,7 @@ async def enviar_recuperacion_contraseña(
     token: str,
     frontend_url: str = "http://localhost:3000",
 ) -> None:
-    """
-    Envía el token de recuperación de contraseña al usuario.
-    """
-    asunto = "[Homologaciones] Recuperación de contraseña"
+    asunto = "[HomologaIA] Recuperación de contraseña"
     html = _html_recuperacion_contraseña(nombre_usuario, token, frontend_url)
     texto = _texto_plano_recuperacion_contraseña(nombre_usuario, token)
     await _enviar(email_usuario, asunto, html, texto)

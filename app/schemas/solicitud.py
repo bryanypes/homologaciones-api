@@ -6,21 +6,17 @@ from app.models.solicitud import EstadoSolicitud
 
 
 class SolicitudCreate(BaseModel):
-    """Crear solicitud con opción de elegir de catálogo o escribir texto libre"""
-    # Datos personales del estudiante (capturados en la solicitud)
     cedula: Optional[str] = None
     telefono: Optional[str] = None
     correo_contacto: Optional[EmailStr] = None
 
-    # Programa origen: elegir de catálogo O escribir texto libre
-    programa_origen_id: Optional[UUID] = None  # Si se elige del catálogo
-    institucion_origen_texto: Optional[str] = None  # Si es "Otra"
-    programa_origen_texto: Optional[str] = None  # Si es "Otra"
+    programa_origen_id: Optional[UUID] = None
+    institucion_origen_texto: Optional[str] = None
+    programa_origen_texto: Optional[str] = None
 
-    # Programa destino: elegir de catálogo O escribir texto libre
-    programa_destino_id: Optional[UUID] = None  # Si se elige del catálogo
-    institucion_destino_texto: Optional[str] = None  # Si es "Otra"
-    programa_destino_texto: Optional[str] = None  # Si es "Otra"
+    programa_destino_id: Optional[UUID] = None
+    institucion_destino_texto: Optional[str] = None
+    programa_destino_texto: Optional[str] = None
 
     @field_validator("cedula")
     @classmethod

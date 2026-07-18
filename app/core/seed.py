@@ -94,7 +94,6 @@ async def seed_academico(db: AsyncSession, deptos_map: dict) -> None:
     if result.scalar_one_or_none():
         return
 
-    # Buscar municipio de Popayán
     result = await db.execute(select(Municipio).where(Municipio.nombre == "Popayán"))
     popayan = result.scalar_one_or_none()
     popayan_id = popayan.id if popayan else None
@@ -182,7 +181,6 @@ async def seed_academico(db: AsyncSession, deptos_map: dict) -> None:
 
 
 async def seed_asignaturas_isw(db: AsyncSession, programa_id) -> None:
-    """Pensum real de Ingeniería de Software y Computación — Resolución No. 15865 del 18 dic 2019."""
     result = await db.execute(
         select(Asignatura).where(Asignatura.programa_id == programa_id).limit(1)
     )
@@ -192,14 +190,12 @@ async def seed_asignaturas_isw(db: AsyncSession, programa_id) -> None:
     # (codigo, nombre, creditos, semestre, tipo, ih, linea_continuidad)
     # semestre 10 = Trabajo de Grado, semestre 11 = Requisitos de Grado
     asignaturas = [
-        # ── SEMESTRE 1 ───────────────────────────────────────────────────────
         ("12190101", "Algebra Moderna",                                  4, 1, "T",  4, ""),
         ("12190102", "Introducción a la Ingeniería",                     2, 1, "T",  2, ""),
         ("12190103", "Introducción a la Programación",                   3, 1, "TP", 3, ""),
         ("12190104", "Cátedra Autónoma",                                 2, 1, "T",  2, ""),
         ("12190105", "Lectura y Escritura de Textos Académicos",         2, 1, "T",  2, ""),
         ("12190106", "Educación y Legislación Ambiental",                3, 1, "T",  2, ""),
-        # ── SEMESTRE 2 ───────────────────────────────────────────────────────
         ("12190204", "Cálculo I",                                        3, 2, "T",  3, "Algebra Moderna"),
         ("12190205", "Álgebra Lineal",                                   2, 2, "T",  2, ""),
         ("12190206", "Física I",                                         3, 2, "TP", 3, ""),
@@ -207,28 +203,24 @@ async def seed_asignaturas_isw(db: AsyncSession, programa_id) -> None:
         ("12190208", "Cultura Emprendedora",                             2, 2, "T",  2, ""),
         ("12190209", "Ambiente y Sociedad",                              3, 2, "T",  3, ""),
         ("12190210", "Competencias Ciudadanas",                          2, 2, "T",  2, ""),
-        # ── SEMESTRE 3 ───────────────────────────────────────────────────────
         ("12190308", "Cálculo II",                                       3, 3, "T",  3, "Cálculo I"),
         ("12190309", "Matemáticas Discretas",                            3, 3, "T",  3, "Álgebra Lineal"),
         ("12190310", "Física II",                                        3, 3, "TP", 3, "Física I"),
         ("12190311", "Arquitectura de Computadores",                     3, 3, "TP", 3, ""),
         ("12190312", "Programación II",                                  4, 3, "TP", 4, ""),
         ("12190313", "Inglés I",                                         2, 3, "T",  2, ""),
-        # ── SEMESTRE 4 ───────────────────────────────────────────────────────
         ("12190413", "Ecuaciones Diferenciales",                         3, 4, "T",  3, "Cálculo II"),
         ("12190414", "Bases de Datos I",                                 4, 4, "TP", 4, ""),
         ("12190415", "Estructura de Datos",                              4, 4, "TP", 4, ""),
         ("12190416", "Ingeniería del Software I",                        4, 4, "TP", 4, ""),
         ("12190417", "Inglés II",                                        2, 4, "T",  2, ""),
         ("12190418", "Transformación Digital e Innovación",              1, 4, "T",  1, ""),
-        # ── SEMESTRE 5 ───────────────────────────────────────────────────────
         ("12190517", "Probabilidad Computacional y Estadística",         3, 5, "T",  3, ""),
         ("12190518", "Bases de Datos II",                                4, 5, "TP", 4, ""),
         ("12190519", "Complejidad Algorítmica",                          3, 5, "T",  4, ""),
         ("12190520", "Desarrollo de Aplicaciones Web",                   2, 5, "TP", 2, ""),
         ("12190521", "Ingeniería del Software II",                       4, 5, "T",  4, "Ingeniería del Software I"),
         ("12190522", "Inglés III",                                       2, 5, "T",  2, ""),
-        # ── SEMESTRE 6 ───────────────────────────────────────────────────────
         ("12190622", "Análisis Numérico",                                3, 6, "T",  3, ""),
         ("12190623", "Arquitectura de Sistemas Operativos",              3, 6, "T",  3, ""),
         ("12190624", "Bases de Datos Avanzadas",                         2, 6, "TP", 2, "Bases de Datos II"),
@@ -236,7 +228,6 @@ async def seed_asignaturas_isw(db: AsyncSession, programa_id) -> None:
         ("12190626", "Desarrollo de Aplicaciones Móviles",               2, 6, "TP", 2, "Desarrollo de Aplicaciones Web"),
         ("12190627", "Calidad del Software I",                           3, 6, "T",  3, ""),
         ("12190628", "Inglés IV",                                        2, 6, "T",  2, ""),
-        # ── SEMESTRE 7 ───────────────────────────────────────────────────────
         ("12190728", "Modelado para la Computación",                     3, 7, "T",  3, ""),
         ("12190729", "Redes de Computadores",                            2, 7, "TP", 2, ""),
         ("12190730", "Seguridad Informática",                            3, 7, "T",  3, ""),
@@ -244,7 +235,6 @@ async def seed_asignaturas_isw(db: AsyncSession, programa_id) -> None:
         ("12190732", "Calidad del Software II",                          3, 7, "T",  3, "Calidad del Software I"),
         ("12190733", "Fundamentos y Metodología de la Investigación",    2, 7, "T",  2, ""),
         ("12190734", "Herramientas para Pensamiento Filosófico",         2, 7, "T",  2, ""),
-        # ── SEMESTRE 8 ───────────────────────────────────────────────────────
         ("12190833", "Gestión de Redes",                                 2, 8, "TP", 2, "Redes de Computadores"),
         ("12190834", "Sistemas de Información Empresariales",            3, 8, "TP", 3, ""),
         ("12190835", "Electiva I",                                       2, 8, "TP", 2, ""),
@@ -252,7 +242,6 @@ async def seed_asignaturas_isw(db: AsyncSession, programa_id) -> None:
         ("12190837", "Electiva V",                                       3, 8, "TP", 3, ""),
         ("12190838", "Creatividad e Innovación",                         2, 8, "T",  2, ""),
         ("12190839", "Taller de Investigación",                          2, 8, "T",  2, "Fundamentos y Metodología de la Investigación"),
-        # ── SEMESTRE 9 ───────────────────────────────────────────────────────
         ("12190938", "HCI",                                              2, 9, "TP", 2, ""),
         ("12190939", "Práctica Profesional",                             2, 9, "P",  2, ""),
         ("12190940", "Gestión Tecnológica y Financiera",                 2, 9, "T",  2, ""),
@@ -260,9 +249,7 @@ async def seed_asignaturas_isw(db: AsyncSession, programa_id) -> None:
         ("12190942", "Electiva IV",                                      3, 9, "TP", 3, ""),
         ("12190943", "Electiva VI",                                      3, 9, "TP", 3, ""),
         ("12190944", "Inteligencia Social y Pensamiento Crítico (Sociología)", 2, 9, "T", 2, ""),
-        # ── TRABAJO DE GRADO (semestre 10) ───────────────────────────────────
         ("TGRADO1219", "Trabajo de Grado Ing. De Software",             0, 10, "TP", 0, ""),
-        # ── REQUISITOS DE GRADO (semestre 11) ────────────────────────────────
         ("12191102", "96 Horas de Seminario de Actualización",           0, 11, "TP", 0, ""),
         ("12191103", "40 Horas de Curso de Extensión",                   0, 11, "TP", 0, ""),
         ("12191104", "Cert. Actividad Dep. Formativo",                   0, 11, "TP", 0, ""),

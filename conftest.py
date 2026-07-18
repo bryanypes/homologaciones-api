@@ -11,7 +11,6 @@ from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# ── Motor SQLite en memoria ────────────────────────────────────
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 
 test_engine = create_async_engine(
@@ -27,7 +26,6 @@ TestSessionLocal = sessionmaker(
 )
 
 
-# ── Override de get_db ─────────────────────────────────────────
 async def override_get_db():
     async with TestSessionLocal() as session:
         try:
@@ -39,7 +37,6 @@ async def override_get_db():
             await session.close()
 
 
-# ── Datos de test ──────────────────────────────────────────────
 ADMIN_EMAIL = "admin@universidad.edu.co"
 ADMIN_PASSWORD = "Admin2024!"
 RECTOR_EMAIL = "vicerrector@universidad.edu.co"
@@ -59,16 +56,8 @@ COORDINADOR = {
 }
 
 
-# ── App con overrides ──────────────────────────────────────────
 @pytest.fixture(scope="session")
 def app_test():
-    """
-    Crea la app FastAPI con:
-    - DB sobreescrita a SQLite en memoria
-    - Redis mockeado (fakeredis o AsyncMock)
-    - Kafka mockeado
-    - Lifespan reemplazado para no conectar a servicios externos
-    """
     _blacklist: dict = {}
 
     fake_redis = AsyncMock()
@@ -93,7 +82,6 @@ def app_test():
 
 @pytest.fixture(scope="session")
 async def setup_db(app_test):
-    """Crea todas las tablas en SQLite y crea el rector inicial."""
     from app.core.database import Base
     from app.models.usuario import Usuario, Rol
     from app.core.security import hash_password
@@ -136,7 +124,6 @@ async def client(app_test, setup_db):
         yield ac
 
 
-# ── Helpers de autenticación ───────────────────────────────────
 async def _login(client: AsyncClient, email: str, password: str) -> str:
     resp = await client.post("/api/v1/auth/login", json={"email": email, "password": password})
     assert resp.status_code == 200, f"Login falló para {email}: {resp.text}"
@@ -151,7 +138,6 @@ async def _registrar_estudiante(client: AsyncClient, datos: dict) -> str:
     return token
 
 
-# ── Tokens ─────────────────────────────────────────────────────
 @pytest.fixture(scope="session")
 async def token_admin(client: AsyncClient) -> str:
     return await _login(client, ADMIN_EMAIL, ADMIN_PASSWORD)
@@ -184,7 +170,6 @@ async def token_coordinador(client: AsyncClient, token_admin: str) -> str:
     return await _login(client, email, COORDINADOR["password"])
 
 
-# ── Solicitudes ────────────────────────────────────────────────
 _SOL_BASE = {
     "institucion_origen": "SENA",
     "programa_origen": "ADSI",
@@ -195,7 +180,6 @@ _SOL_BASE = {
 
 @pytest.fixture(scope="session")
 async def solicitud_id(client: AsyncClient, token_estudiante: str) -> str:
-    """Solicitud en estado borrador, sin PDFs — para tests de acceso y documentos."""
     resp = await client.post(
         "/api/v1/solicitudes/",
         headers={"Authorization": f"Bearer {token_estudiante}"},
@@ -207,7 +191,6 @@ async def solicitud_id(client: AsyncClient, token_estudiante: str) -> str:
 
 @pytest.fixture(scope="session")
 async def solicitud_enviada_id(client: AsyncClient, token_estudiante: str) -> str:
-    """Solicitud separada con PDFs subidos y enviada — para tests de flujo."""
     crear = await client.post(
         "/api/v1/solicitudes/",
         headers={"Authorization": f"Bearer {token_estudiante}"},

@@ -1,15 +1,3 @@
-"""
-Worker Kafka para eventos del sistema de homologaciones.
-
-Corre en un thread daemon al startup de la aplicación.
-Consume dos topics:
-  - TOPIC_SOLICITUDES: cambios de estado de solicitudes
-  - TOPIC_HOMOLOGACIONES: homologaciones completadas por la IA
-
-Al recibir cada evento, dispara la notificación por email al estudiante.
-Los datos del estudiante vienen en el payload del evento publicado por kafka_service.
-"""
-
 import asyncio
 import json
 import logging
@@ -29,7 +17,6 @@ logger = logging.getLogger(__name__)
 
 
 def _run_async(coro) -> None:
-    """Ejecuta una corutina desde un contexto síncrono (thread)."""
     try:
         loop = asyncio.new_event_loop()
         loop.run_until_complete(coro)

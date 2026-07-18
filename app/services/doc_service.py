@@ -1,9 +1,3 @@
-"""
-doc_service.py — Generación de Resolución de Homologación con docxtpl
-
-Usa la plantilla templates/plantilla_resolucion_matricula.docx (Jinja2).
-"""
-
 import os
 import logging
 from datetime import datetime
@@ -80,10 +74,6 @@ def _plantilla_path() -> str:
 
 
 def generar_resolucion_docx(homologacion, solicitud, asignaturas_destino=None) -> str:
-    """
-    Genera la resolución Word usando docxtpl.
-    Retorna la ruta local al archivo .docx generado.
-    """
     estudiante = solicitud.estudiante
     nombre_completo = f"{estudiante.nombre} {estudiante.apellido}".upper()
 
@@ -91,7 +81,6 @@ def generar_resolucion_docx(homologacion, solicitud, asignaturas_destino=None) -
     fecha_larga = f"{hoy.day} de {MESES_ES[hoy.month]} de {hoy.year}"
     fecha_notificacion = f"{hoy.day:02d}/{hoy.month:02d}/{hoy.year}"
 
-    # ── Cursos homologados → bloque 1 ─────────────────────────────────────────
     cursos_bloque1 = []
     total_creditos_bloque1 = 0
 
@@ -111,10 +100,8 @@ def generar_resolucion_docx(homologacion, solicitud, asignaturas_destino=None) -
             "calificacion": calif,
         })
 
-    # ── Bloque 2 vacío (un solo origen en la solicitud actual) ───────────────
     cursos_bloque2: list = []
 
-    # ── Cursos proyectados (semestre más bajo pendiente, sem 1-9) ─────────────
     cursos_proyectados = []
     if asignaturas_destino:
         nombres_homologados = {
@@ -155,11 +142,9 @@ def generar_resolucion_docx(homologacion, solicitud, asignaturas_destino=None) -
         _safe_int(c["cr"]) for c in cursos_proyectados
     )
 
-    # ── Documentos analizados ─────────────────────────────────────────────────
     documentos_anexos = list(DOCUMENTOS_FOLIOS)
     total_folios = sum(d["folios"] for d in documentos_anexos)
 
-    # ── Contexto Jinja2 ───────────────────────────────────────────────────────
     context = {
         "numero_resolucion":        solicitud.numero_resolucion or "____",
         "fecha_resolucion":         fecha_larga,

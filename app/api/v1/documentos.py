@@ -21,10 +21,6 @@ MIME_DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.docu
 LIMITE_PENSUM_ORIGEN = 4
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Helpers internos
-# ──────────────────────────────────────────────────────────────────────────────
-
 def _generar_url_documento(solicitud_id: UUID, documento_id: UUID) -> str:
     return f"{settings.BASE_URL}/api/v1/documentos/{solicitud_id}/{documento_id}/descargar"
 
@@ -81,7 +77,6 @@ async def _upsert_documento(
     file: UploadFile,
     mime: str = MIME_PDF,
 ) -> Documento:
-    """Crea o reemplaza el documento de un tipo dado (para tipos de un solo doc)."""
     ext = ".docx" if mime == MIME_DOCX else ".pdf"
     contenido = await _leer_y_validar(file)
     nombre_unico = f"{solicitud_id}_{tipo.value}{ext}"
@@ -128,10 +123,6 @@ def _documento_a_response(doc: Documento) -> DocumentoResponse:
         creado_en=doc.creado_en,
     )
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Endpoints — Estudiante
-# ──────────────────────────────────────────────────────────────────────────────
 
 @router.post(
     "/{solicitud_id}/notas",
@@ -259,10 +250,6 @@ async def eliminar_documento(
     await db.commit()
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Endpoints — Coordinador
-# ──────────────────────────────────────────────────────────────────────────────
-
 @router.post(
     "/{solicitud_id}/pensum-destino",
     response_model=DocumentoResponse,
@@ -347,10 +334,6 @@ async def subir_resolucion(
     doc = await _upsert_documento(db, solicitud_id, TipoDocumento.RESOLUCION, file, mime=mime)
     return _documento_a_response(doc)
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Endpoints — Lectura (todos los roles con scope)
-# ──────────────────────────────────────────────────────────────────────────────
 
 @router.get(
     "/{solicitud_id}",

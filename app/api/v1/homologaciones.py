@@ -29,7 +29,6 @@ router = APIRouter(prefix="/homologaciones", tags=["Homologaciones"])
 
 
 def _build_pensum_text(asignaturas: list, programa_nombre: str = "") -> str:
-    """Construye texto del pensum a partir de asignaturas de la BD para pasarlo a la IA."""
     lines = [f"PLAN DE ESTUDIOS — {programa_nombre.upper()}\n"]
     sem_actual = None
     for a in sorted(asignaturas, key=lambda x: (x.semestre or 0, x.nombre)):
@@ -92,7 +91,6 @@ async def procesar(
                    "El estudiante debe subirlo en POST /documentos/{id}/notas",
         )
 
-    # Verificar si el programa destino tiene asignaturas en la BD
     asignaturas_programa: list[Asignatura] = []
     if solicitud.programa_destino_id:
         result_asig = await db.execute(
@@ -110,7 +108,6 @@ async def procesar(
                    "o el programa debe tener asignaturas registradas en la base de datos.",
         )
 
-    # Si es un reprocesamiento, eliminar la homologación previa y sus asignaturas
     if solicitud.estado == EstadoSolicitud.REVISION_COORDINADOR:
         result_hom = await db.execute(
             select(Homologacion).where(Homologacion.solicitud_id == solicitud_id)
@@ -465,7 +462,6 @@ async def resumen_homologacion(
     if not homologacion:
         raise HTTPException(status_code=404, detail="Homologación no encontrada")
 
-    # Estudiantes solo pueden ver el resumen de sus propias solicitudes
     if usuario.rol == Rol.ESTUDIANTE:
         sol = homologacion.solicitud
         if not sol or sol.estudiante_id != usuario.id:
@@ -596,7 +592,6 @@ async def generar_resolucion(
     if not homologacion:
         raise HTTPException(status_code=404, detail="Homologación no encontrada")
 
-    # Obtener asignaturas del programa destino para calcular cursos pendientes
     asignaturas_destino: list[Asignatura] = []
     if solicitud.programa_destino_id:
         result_asig = await db.execute(

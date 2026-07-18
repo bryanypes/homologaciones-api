@@ -28,18 +28,15 @@ class Solicitud(Base):
         UUID(as_uuid=True), ForeignKey("usuarios.id"), nullable=False, index=True
     )
 
-    # ── Datos personales del estudiante al momento de la solicitud ───────────
-    # Se guardan aquí para que la resolución refleje los datos exactos en ese
-    # momento, aunque el usuario actualice su perfil después.
+    # Se guardan al momento de crear la solicitud para que la resolución refleje
+    # los datos exactos aunque el usuario actualice su perfil después.
     cedula: Mapped[str] = mapped_column(String(20), nullable=True)
     telefono: Mapped[str] = mapped_column(String(20), nullable=True)
     correo_contacto: Mapped[str] = mapped_column(String(255), nullable=True)
 
-    # ── Programa de origen (institución de la que viene el estudiante) ────────
     institucion_origen: Mapped[str] = mapped_column(String(255), nullable=True)
     programa_origen: Mapped[str] = mapped_column(String(255), nullable=True)
 
-    # ── Programa de destino (Uniautónoma) ─────────────────────────────────────
     institucion_destino: Mapped[str] = mapped_column(String(255), nullable=True)
     programa_destino: Mapped[str] = mapped_column(String(255), nullable=True)
 
@@ -51,7 +48,6 @@ class Solicitud(Base):
         UUID(as_uuid=True), ForeignKey("programas.id"), nullable=True
     )
 
-    # ── Estado y auditoría ───────────────────────────────────────────────────
     numero_resolucion: Mapped[str] = mapped_column(String(30), nullable=True)
     estado: Mapped[EstadoSolicitud] = mapped_column(
         SAEnum(EstadoSolicitud, values_callable=lambda x: [e.value for e in x]),
@@ -63,7 +59,6 @@ class Solicitud(Base):
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )
 
-    # ── Relaciones ───────────────────────────────────────────────────────────
     estudiante: Mapped["Usuario"] = relationship(
         "Usuario", foreign_keys=[estudiante_id]
     )

@@ -1,10 +1,3 @@
-"""
-ai_service.py — Procesamiento de homologación con OpenAI GPT-4o-mini
-
-Estrategia: extraer texto de los PDFs y enviarlo como texto plano.
-GPT-4o-mini no acepta PDFs como imágenes — solo PNG/JPEG/WebP.
-"""
-
 import asyncio
 import json
 import logging
@@ -141,10 +134,6 @@ async def procesar_homologacion(
     ruta_destino: str | None = None,
     pensum_destino_texto: str | None = None,
 ) -> dict[str, Any]:
-    """
-    Procesa una homologación con IA.
-    Acepta el pensum destino como PDF (ruta_destino) o como texto prearmado (pensum_destino_texto).
-    """
     client = _get_client()
 
     logger.info("[AI] Extrayendo texto de PDFs de origen...")
