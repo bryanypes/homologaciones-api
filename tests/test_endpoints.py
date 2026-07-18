@@ -567,11 +567,8 @@ class TestUsuarios:
 class TestEmailService:
 
     @patch("app.services.email_service.settings")
-    async def test_no_falla_sin_smtp(self, mock_settings):
-        mock_settings.SMTP_HOST = None
-        mock_settings.SMTP_USER = None
-        mock_settings.SMTP_PASSWORD = None
-        mock_settings.EMAIL_FROM = None
+    async def test_no_falla_sin_api_key(self, mock_settings):
+        mock_settings.RESEND_API_KEY = None
         from app.services.email_service import notificar_cambio_estado
         await notificar_cambio_estado(
             email_estudiante="test@test.com",
@@ -581,10 +578,12 @@ class TestEmailService:
             estado_nuevo="enviada",
         )
 
-    @patch("app.services.email_service._email_configurado", return_value=True)
-    @patch("app.services.email_service.aiosmtplib")
-    async def test_envia_con_smtp_configurado(self, mock_smtp, mock_configurado):
-        mock_smtp.send = AsyncMock()
+    @patch("app.services.email_service.resend")
+    @patch("app.services.email_service.settings")
+    async def test_envia_con_resend_configurado(self, mock_settings, mock_resend):
+        mock_settings.RESEND_API_KEY = "re_test_key"
+        mock_settings.EMAIL_FROM = "test@test.com"
+        mock_resend.Emails.send = MagicMock(return_value={"id": "abc123"})
         from app.services.email_service import notificar_cambio_estado
         await notificar_cambio_estado(
             email_estudiante="estudiante@test.com",
@@ -593,18 +592,19 @@ class TestEmailService:
             estado_anterior="borrador",
             estado_nuevo="enviada",
         )
-        mock_smtp.send.assert_called_once()
+        mock_resend.Emails.send.assert_called_once()
 
-    @patch("app.services.email_service._email_configurado", return_value=True)
-    @patch("app.services.email_service.aiosmtplib")
-    async def test_enviar_recuperacion_contraseña(self, mock_smtp, mock_configurado):
+    @patch("app.services.email_service.resend")
+    @patch("app.services.email_service.settings")
+    async def test_enviar_recuperacion_contraseña(self, mock_settings, mock_resend):
         """Test: Enviar email de recuperación de contraseña"""
-        mock_smtp.send = AsyncMock()
+        mock_settings.RESEND_API_KEY = "re_test_key"
+        mock_settings.EMAIL_FROM = "test@test.com"
+        mock_resend.Emails.send = MagicMock(return_value={"id": "abc123"})
         from app.services.email_service import enviar_recuperacion_contraseña
-        
         await enviar_recuperacion_contraseña(
             email_usuario="usuario@test.com",
             nombre_usuario="Carlos García",
             token="token_seguro_xyz",
         )
-        mock_smtp.send.assert_called_once()
+        mock_resend.Emails.send.assert_called_once()
