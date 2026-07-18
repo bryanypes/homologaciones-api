@@ -645,6 +645,7 @@ dependencies = [
     { name = "python-jose", extra = ["cryptography"] },
     { name = "python-multipart" },
     { name = "redis" },
+    { name = "resend" },
     { name = "sqlalchemy" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -678,6 +679,7 @@ requires-dist = [
     { name = "python-jose", extras = ["cryptography"], specifier = ">=3.5.0" },
     { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "redis", specifier = ">=8.0.0" },
+    { name = "resend", specifier = ">=2.34.0" },
     { name = "sqlalchemy", specifier = ">=2.0.50" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.49.0" },
 ]
@@ -1423,6 +1425,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/ac/c3/e2a2b89f2d3e2179abd6d00ebd70bff6273f37fb3e0cc209f48b39d00cbf/requests-2.34.2.tar.gz", hash = "sha256:f288924cae4e29463698d6d60bc6a4da69c89185ad1e0bcc4104f584e960b9ed", size = 142856, upload-time = "2026-05-14T19:25:27.735Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a0/f4/c67b0b3f1b9245e8d266f0f112c500d50e5b4e83cb6f3b71b6528104182a/requests-2.34.2-py3-none-any.whl", hash = "sha256:2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0", size = 73075, upload-time = "2026-05-14T19:25:26.443Z" },
+]
+
+[[package]]
+name = "resend"
+version = "2.34.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "requests" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ce/6c/bc56f0ee688afaed75470008d4d8b077e6b0098dcedc9bede47b7c2b7889/resend-2.34.0.tar.gz", hash = "sha256:0d9cfc73594702f4242f8a539d4a50dc17c6db9476fd0d71f48d13e24e463f47", size = 52026, upload-time = "2026-07-17T13:36:28.242Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5b/05/a0d296e1146b6638c0fb7027fb8ac03738d5969b45b2a7ba4136036a0380/resend-2.34.0-py2.py3-none-any.whl", hash = "sha256:2f1db326dfdebb1a6369c3bd85d45455b54edcc505d2b5382f19d4f733d9e2e0", size = 81782, upload-time = "2026-07-17T13:36:27.028Z" },
 ]
 
 [[package]]

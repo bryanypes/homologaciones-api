@@ -1,11 +1,7 @@
 import logging
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 from typing import Optional
 
-# FIX: import al nivel del módulo para que @patch("app.services.email_service.aiosmtplib")
-# funcione correctamente en los tests. El import tardío dentro de _enviar impedía el patcheo.
-import aiosmtplib
+import resend
 
 from app.core.config import settings
 
@@ -190,47 +186,24 @@ def _texto_plano_recuperacion_contraseña(
 # Funciones de envío
 # ──────────────────────────────────────────────────────────────
 
-def _email_configurado() -> bool:
-    return all([
-        settings.SMTP_HOST,
-        settings.SMTP_USER,
-        settings.SMTP_PASSWORD,
-        settings.EMAIL_FROM,
-    ])
-
-
 async def _enviar(destinatario: str, asunto: str, html: str, texto: str) -> None:
-    """Función base de envío. Falla silenciosamente si el SMTP no está configurado."""
-    if not _email_configurado():
-        logger.warning(
-            "[Email] SMTP no configurado. Saltando envío a %s. Asunto: %s",
-            destinatario,
-            asunto,
-        )
+    """Envía email via Resend HTTP API. Falla silenciosamente si no está configurado."""
+    if not settings.RESEND_API_KEY:
+        logger.warning("[Email] RESEND_API_KEY no configurada. Saltando envío a %s.", destinatario)
         return
 
-    # FIX: eliminado el `import aiosmtplib` tardío que estaba dentro del try.
-    # El import al nivel del módulo es suficiente y permite que el patch de tests funcione.
     try:
-        mensaje = MIMEMultipart("alternative")
-        mensaje["Subject"] = asunto
-        mensaje["From"] = settings.EMAIL_FROM
-        mensaje["To"] = destinatario
-        mensaje.attach(MIMEText(texto, "plain", "utf-8"))
-        mensaje.attach(MIMEText(html, "html", "utf-8"))
-
-        await aiosmtplib.send(
-            mensaje,
-            hostname=settings.SMTP_HOST,
-            port=settings.SMTP_PORT,
-            username=settings.SMTP_USER,
-            password=settings.SMTP_PASSWORD,
-            start_tls=True,
-        )
+        resend.api_key = settings.RESEND_API_KEY
+        email_from = settings.EMAIL_FROM or "Sistema Homologaciones <onboarding@resend.dev>"
+        resend.Emails.send({
+            "from": email_from,
+            "to": [destinatario],
+            "subject": asunto,
+            "html": html,
+            "text": texto,
+        })
         logger.info("[Email] Enviado a %s — %s", destinatario, asunto)
-
     except Exception as exc:
-        # No propagamos el error para que no rompa el flujo principal
         logger.error("[Email] Error al enviar a %s: %s", destinatario, exc)
 
 
