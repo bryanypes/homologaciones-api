@@ -4,18 +4,20 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
-.Python
 *.egg-info/
 dist/
 build/
 
-# Environment
+# Entorno
 .env
+.env.local
 .env.docker
 
-# Uploads
+# Archivos subidos
 uploads/
 
+# Resoluciones generadas
+output/
 
 # IDE
 .vscode/
@@ -25,5 +27,10 @@ uploads/
 .DS_Store
 Thumbs.db
 
-# Docker
+# Logs
 *.log
+
+# Tests
+.pytest_cache/
+.coverage
+htmlcov/
