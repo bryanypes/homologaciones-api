@@ -22,8 +22,15 @@ async def _login_rector(client: AsyncClient) -> str:
     assert r.status_code == 200, "El seed del rector no corrió"
     return r.json()["access_token"]
 
-async def _crear_coordinador_y_login(client: AsyncClient, token_rector: str, email: str) -> str:
-    await client.post("/api/v1/usuarios/", headers={"Authorization": f"Bearer {token_rector}"},
+async def _login_admin(client: AsyncClient) -> str:
+    r = await client.post("/api/v1/auth/login", json={
+        "email": "admin@universidad.edu.co", "password": "Admin2024!"
+    })
+    assert r.status_code == 200, "El seed del admin no corrió"
+    return r.json()["access_token"]
+
+async def _crear_coordinador_y_login(client: AsyncClient, token_admin: str, email: str) -> str:
+    await client.post("/api/v1/usuarios/", headers={"Authorization": f"Bearer {token_admin}"},
         json={"nombre": "Coord", "apellido": "Test", "email": email, "password": "Coord2024!", "rol": "coordinador"})
     r = await client.post("/api/v1/auth/login", json={"email": email, "password": "Coord2024!"})
     return r.json()["access_token"]
@@ -60,8 +67,6 @@ async def _crear_solicitud_texto_libre(client: AsyncClient, token: str) -> str:
     r = await client.post("/api/v1/solicitudes/",
         headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
         json={
-            "cedula": "1061529242",
-            "telefono": "3148757616",
             "correo_contacto": "test@test.com",
             "institucion_origen_texto": "Universidad Privada de Perú",
             "programa_origen_texto": "Ingeniería Informática",
@@ -276,7 +281,7 @@ class TestControlAcceso:
         assert r.status_code == 403
 
     async def test_coordinador_no_puede_subir_notas(self, client: AsyncClient):
-        token_r = await _login_rector(client)
+        token_r = await _login_admin(client)
         token_c = await _crear_coordinador_y_login(client, token_r, f"c_{uuid4().hex[:6]}@test.com")
         token_e = await _registrar_estudiante(client, f"e_{uuid4().hex[:6]}@test.com")
         
@@ -424,7 +429,7 @@ class TestDocumentos:
 class TestUsuarios:
 
     async def test_rector_crea_coordinador(self, client: AsyncClient):
-        token_r = await _login_rector(client)
+        token_r = await _login_admin(client)
         email = f"coord_{uuid4().hex[:6]}@test.com"
         r = await client.post("/api/v1/usuarios/",
             headers={"Authorization": f"Bearer {token_r}", "Content-Type": "application/json"},
@@ -434,7 +439,7 @@ class TestUsuarios:
         assert r.json()["rol"] == "coordinador"
 
     async def test_rector_lista_con_paginacion(self, client: AsyncClient):
-        token_r = await _login_rector(client)
+        token_r = await _login_admin(client)
         r = await client.get("/api/v1/usuarios/?page=1&size=10",
             headers={"Authorization": f"Bearer {token_r}"})
         assert r.status_code == 200
@@ -442,7 +447,7 @@ class TestUsuarios:
         assert "total" in body and "items" in body
 
     async def test_rector_desactiva_y_reactiva(self, client: AsyncClient):
-        token_r = await _login_rector(client)
+        token_r = await _login_admin(client)
         email = f"d_{uuid4().hex[:6]}@test.com"
         r = await client.post("/api/v1/usuarios/",
             headers={"Authorization": f"Bearer {token_r}", "Content-Type": "application/json"},
@@ -465,7 +470,7 @@ class TestUsuarios:
         assert act.json()["activo"] is True
 
     async def test_rector_no_se_desactiva_a_si_mismo(self, client: AsyncClient):
-        token_r = await _login_rector(client)
+        token_r = await _login_admin(client)
         me = await client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token_r}"})
         uid = me.json()["id"]
         r = await client.patch(f"/api/v1/usuarios/{uid}/desactivar",
@@ -473,7 +478,7 @@ class TestUsuarios:
         assert r.status_code == 400
 
     async def test_filtro_rol_usuarios(self, client: AsyncClient):
-        token_r = await _login_rector(client)
+        token_r = await _login_admin(client)
         r = await client.get("/api/v1/usuarios/?rol=estudiante",
             headers={"Authorization": f"Bearer {token_r}"})
         assert r.status_code == 200

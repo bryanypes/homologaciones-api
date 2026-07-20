@@ -13,9 +13,7 @@ class Institucion(Base):
     codigo_ies: Mapped[str] = mapped_column(String(20), nullable=True)
     tipo: Mapped[str] = mapped_column(String(50), nullable=True)
     direccion: Mapped[str] = mapped_column(String(255), nullable=True)
-    municipio_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("municipios.id"), nullable=True)
 
-    municipio: Mapped["Municipio"] = relationship("Municipio")
     facultades: Mapped[list["Facultad"]] = relationship("Facultad", back_populates="institucion")
 
 

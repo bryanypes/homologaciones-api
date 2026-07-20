@@ -1,12 +1,11 @@
 [project]
 name = "homologaciones-api"
-version = "0.1.0"
-description = "Add your description here"
+version = "1.0.0"
+description = "HomologaIA – Sistema de Gestión de Homologaciones Académicas. Corporación Universitaria Autónoma del Cauca."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.18.4",
-    "anthropic>=0.107.1",
     "asyncpg>=0.31.0",
     "fastapi>=0.136.3",
     "kafka-python>=2.3.2",
