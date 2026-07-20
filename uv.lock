@@ -58,25 +58,6 @@ wheels = [
 ]
 
 [[package]]
-name = "anthropic"
-version = "0.107.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "anyio" },
-    { name = "distro" },
-    { name = "docstring-parser" },
-    { name = "httpx" },
-    { name = "jiter" },
-    { name = "pydantic" },
-    { name = "sniffio" },
-    { name = "typing-extensions" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/b1/f1/c6076a92e0bf6b0dfa126e213b3f9e8a510acd73567953210713aae6c256/anthropic-0.107.1.tar.gz", hash = "sha256:8e7169a6ab57fb806b778d9af018c867bad688144efec8969cdb4c5ccecd6670", size = 856312, upload-time = "2026-06-07T17:18:57.358Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/86/0e/71432f0777a263701955a23ebcc6650485c2753be9afbce2a6a8d72526e3/anthropic-0.107.1-py3-none-any.whl", hash = "sha256:b74338d08000ba105dfc8adae29af3713ece845a4bffec9986a20697e087c7b3", size = 838729, upload-time = "2026-06-07T17:18:58.729Z" },
-]
-
-[[package]]
 name = "anyio"
 version = "4.13.0"
 source = { registry = "https://pypi.org/simple" }
@@ -455,15 +436,6 @@ wheels = [
 ]
 
 [[package]]
-name = "docstring-parser"
-version = "0.18.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/e0/4d/f332313098c1de1b2d2ff91cf2674415cc7cddab2ca1b01ae29774bd5fdf/docstring_parser-0.18.0.tar.gz", hash = "sha256:292510982205c12b1248696f44959db3cdd1740237a968ea1e2e7a900eeb2015", size = 29341, upload-time = "2026-04-14T04:09:19.867Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/a7/5f/ed01f9a3cdffbd5a008556fc7b2a08ddb1cc6ace7effa7340604b1d16699/docstring_parser-0.18.0-py3-none-any.whl", hash = "sha256:b3fcbed555c47d8479be0796ef7e19c2670d428d72e96da63f3a40122860374b", size = 22484, upload-time = "2026-04-14T04:09:18.638Z" },
-]
-
-[[package]]
 name = "docxtpl"
 version = "0.20.2"
 source = { registry = "https://pypi.org/simple" }
@@ -623,12 +595,11 @@ wheels = [
 
 [[package]]
 name = "homologaciones-api"
-version = "0.1.0"
+version = "1.0.0"
 source = { virtual = "." }
 dependencies = [
     { name = "aiosmtplib" },
     { name = "alembic" },
-    { name = "anthropic" },
     { name = "asyncpg" },
     { name = "bcrypt" },
     { name = "boto3" },
@@ -663,7 +634,6 @@ dev = [
 requires-dist = [
     { name = "aiosmtplib", specifier = ">=5.1.1" },
     { name = "alembic", specifier = ">=1.18.4" },
-    { name = "anthropic", specifier = ">=0.107.1" },
     { name = "asyncpg", specifier = ">=0.31.0" },
     { name = "bcrypt", specifier = ">=5.0.0" },
     { name = "boto3", specifier = ">=1.35.0" },

@@ -1,7 +1,4 @@
-import base64
 import logging
-import os
-from functools import lru_cache
 from typing import Optional
 
 import httpx
@@ -44,19 +41,8 @@ _MASCOTA_ESTADO = {
     "borrador":             "IAsaludando.png",
 }
 
-_TEMPLATES_DIR = os.path.normpath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "templates")
-)
-
-
-@lru_cache(maxsize=16)
-def _img(nombre: str) -> str:
-    try:
-        with open(os.path.join(_TEMPLATES_DIR, nombre), "rb") as f:
-            b64 = base64.b64encode(f.read()).decode()
-        return f"data:image/png;base64,{b64}"
-    except FileNotFoundError:
-        return ""
+def _img_url(nombre: str) -> str:
+    return f"{settings.BASE_URL}/static/email/{nombre}"
 
 
 _CSS = """
@@ -121,10 +107,8 @@ _CSS = """
 
 
 def _email(body_html: str, mascota: str = "IAsaludando.png") -> str:
-    logo_src = _img("LOGO.png")
-    mascota_src = _img(mascota)
-    logo_tag = f'<img src="{logo_src}" alt="HomologaIA" />' if logo_src else ""
-    mascota_tag = f'<img src="{mascota_src}" alt="" />' if mascota_src else ""
+    logo_tag = f'<img src="{_img_url("LOGO.png")}" alt="HomologaIA" style="width:36px;height:36px;object-fit:contain" />'
+    mascota_tag = f'<img src="{_img_url(mascota)}" alt="" style="height:88px;width:auto" />'
     return f"""<!DOCTYPE html>
 <html lang="es">
 <head>

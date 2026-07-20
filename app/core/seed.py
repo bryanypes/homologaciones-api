@@ -1,11 +1,9 @@
-import csv
-from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from app.models.catalogo import Pais, Departamento, Municipio
 from app.models.academico import Institucion, Facultad, Programa, Asignatura
 from app.models.usuario import Usuario, Rol
 import bcrypt
+
 
 async def crear_usuario_inicial(db: AsyncSession):
     usuarios_iniciales = [
@@ -38,65 +36,21 @@ async def crear_usuario_inicial(db: AsyncSession):
             ))
     await db.commit()
 
-DATA_DIR = Path(__file__).parent.parent.parent / "database" / "data"
-
-CODIGOS_PAISES = {
-    "Colombia": "CO",
-    "Otro": "OT",
-}
-
 
 async def seed_catalogos(db: AsyncSession) -> None:
-    result = await db.execute(select(Pais).limit(1))
-    if result.scalar_one_or_none():
-        return
-
-    paises_map = {}
-    with open(DATA_DIR / "paises.csv", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f, delimiter=";")
-        for row in reader:
-            pais = Pais(
-                nombre=row["nombre"],
-                codigo=CODIGOS_PAISES.get(row["nombre"], row["id_pais"]),
-            )
-            db.add(pais)
-            await db.flush()
-            paises_map[int(row["id_pais"])] = pais.id
-
-    deptos_map = {}
-    with open(DATA_DIR / "departamentos.csv", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f, delimiter=";")
-        for row in reader:
-            depto = Departamento(
-                nombre=row["nombre"],
-                pais_id=paises_map[int(row["pais_id"])],
-            )
-            db.add(depto)
-            await db.flush()
-            deptos_map[int(row["id_departamento"])] = depto.id
-
-    with open(DATA_DIR / "municipios.csv", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f, delimiter=";")
-        for row in reader:
-            db.add(Municipio(
-                nombre=row["nombre"],
-                departamento_id=deptos_map[int(row["departamento_id"])],
-            ))
-
-    await db.flush()
-    await seed_academico(db, deptos_map)
-    await db.commit()
-    await crear_usuario_inicial(db)
-
-
-async def seed_academico(db: AsyncSession, deptos_map: dict) -> None:
     result = await db.execute(select(Institucion).limit(1))
     if result.scalar_one_or_none():
         return
 
-    result = await db.execute(select(Municipio).where(Municipio.nombre == "Popayán"))
-    popayan = result.scalar_one_or_none()
-    popayan_id = popayan.id if popayan else None
+    await seed_academico(db)
+    await db.commit()
+    await crear_usuario_inicial(db)
+
+
+async def seed_academico(db: AsyncSession) -> None:
+    result = await db.execute(select(Institucion).limit(1))
+    if result.scalar_one_or_none():
+        return
 
     instituciones_data = [
         ("Corporación Universitaria Autónoma del Cauca", "2849", "Universitaria"),
@@ -112,7 +66,6 @@ async def seed_academico(db: AsyncSession, deptos_map: dict) -> None:
             nombre=nombre,
             codigo_ies=codigo,
             tipo=tipo,
-            municipio_id=popayan_id,
         )
         db.add(inst)
         await db.flush()

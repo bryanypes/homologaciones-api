@@ -1,6 +1,6 @@
-# Sistema de Homologaciones — Uniautónoma del Cauca
+# HomologaIA — Sistema de Gestión de Homologaciones Académicas
 
-Backend para gestión de solicitudes de homologación académica. Incluye análisis con IA y generación de resoluciones en Word.
+Backend de HomologaIA, plataforma para gestión de solicitudes de homologación académica de la Corporación Universitaria Autónoma del Cauca. Incluye análisis con IA y generación de resoluciones en Word.
 
 ## Stack
 
