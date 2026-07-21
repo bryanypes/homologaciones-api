@@ -99,7 +99,6 @@ def upgrade() -> None:
     )
 
 def downgrade() -> None:
-    # 1. Primero borramos tablas
     op.drop_table('homologacion_asignaturas')
     op.drop_table('homologaciones')
     op.drop_table('historial_estados')
@@ -108,7 +107,6 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_usuarios_email'), table_name='usuarios')
     op.drop_table('usuarios')
 
-    # 2. Después borramos los tipos, asegurándonos de que si existen se eliminen con CASCADE
     op.execute("DROP TYPE IF EXISTS estadoasignatura CASCADE;")
     op.execute("DROP TYPE IF EXISTS tipodocumento CASCADE;")
     op.execute("DROP TYPE IF EXISTS estadosolicitud CASCADE;")

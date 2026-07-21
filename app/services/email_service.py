@@ -29,7 +29,6 @@ _BADGE = {
     "borrador":             "background:#F2F0E8;color:#6D6C69",
 }
 
-# Qué mascota usar según el estado de la solicitud
 _MASCOTA_ESTADO = {
     "aprobada":             "Iaaprobada.png",
     "rechazada":            "Iaerror.png",

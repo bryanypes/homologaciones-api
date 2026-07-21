@@ -21,13 +21,11 @@ def upgrade() -> None:
     bind = op.get_bind()
     engine = bind.engine
 
-    # Conexión nueva e independiente de la transacción de Alembic,
-    # para que el ALTER TYPE se comprometa de inmediato
+    # Conexión aparte en autocommit: ALTER TYPE ADD VALUE debe confirmarse
+    # antes de poder usarse en la misma migración.
     with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as autocommit_conn:
         autocommit_conn.execute(sa.text("ALTER TYPE rol ADD VALUE IF NOT EXISTS 'vicerrector'"))
 
-    # Esto corre en la transacción normal de la migración, y ya puede
-    # usar 'vicerrector' porque fue comprometido por otra conexión
     op.execute("UPDATE usuarios SET rol = 'vicerrector' WHERE rol = 'rector'")
 
     op.add_column('asignaturas', sa.Column('codigo', sa.String(50), nullable=True))

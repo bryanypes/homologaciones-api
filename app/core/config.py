@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
-    RESET_PASSWORD_TOKEN_EXPIRE_MINUTES: int = 30  # Token de reset válido 30 minutos
+    RESET_PASSWORD_TOKEN_EXPIRE_MINUTES: int = 30
 
     #Gemini
     OPENAI_API_KEY: str
@@ -33,9 +33,9 @@ class Settings(BaseSettings):
     # Storage
     UPLOAD_DIR: str = "uploads"
     MAX_FILE_SIZE_MB: int = 10
-    BASE_URL: str = "http://localhost:8000"  # URL base para generar links de documentos
+    BASE_URL: str = "http://localhost:8000"
 
-    # Email — Brevo (https://brevo.com, 300 correos/día gratis)
+    # Email — Brevo
     BREVO_API_KEY: Optional[str] = None
     EMAIL_FROM: Optional[str] = None
 

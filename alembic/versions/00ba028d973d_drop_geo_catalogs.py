@@ -20,10 +20,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
-    # Quitar FK de instituciones antes de dropear municipios
     op.drop_constraint('instituciones_municipio_id_fkey', 'instituciones', type_='foreignkey')
     op.drop_column('instituciones', 'municipio_id')
-    # Dropear en orden: hijos primero
     op.drop_table('municipios')
     op.drop_table('departamentos')
     op.drop_table('paises')
