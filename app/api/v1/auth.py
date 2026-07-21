@@ -27,7 +27,6 @@ router = APIRouter(prefix="/auth", tags=["Autenticación"])
     },
 )
 async def register(data: UsuarioCreate, db: AsyncSession = Depends(get_db)):
-    # Registro público solo para estudiantes
     if data.rol != Rol.ESTUDIANTE:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
