@@ -54,8 +54,8 @@ async def _crear_solicitud_con_catalogo(client: AsyncClient, token: str,
     r = await client.post("/api/v1/solicitudes/",
         headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
         json={
-            "cedula": "1061529242",
-            "telefono": "3148757616",
+            "cedula": "1000000001",
+            "telefono": "3000000001",
             "correo_contacto": "test@test.com",
             "programa_origen_id": programa_origen_id,
             "programa_destino_id": programa_destino_id,
@@ -332,8 +332,8 @@ class TestSolicitudes:
         r = await client.post("/api/v1/solicitudes/",
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
             json={
-                "cedula": "1061529242",
-                "telefono": "3148757616",
+                "cedula": "1000000001",
+                "telefono": "3000000001",
                 "correo_contacto": "test@test.com",
             })
         assert r.status_code == 400

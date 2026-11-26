@@ -8,7 +8,7 @@ from typing import Optional
 class UsuarioBase(BaseModel):
     nombre: str = Field(..., example="Carlos", description="Nombre del usuario")
     apellido: str = Field(..., example="García", description="Apellido del usuario")
-    email: EmailStr = Field(..., example="carlos@unicauca.edu.co", description="Correo institucional")
+    email: EmailStr = Field(..., example="estudiante@universidad.edu.co", description="Correo institucional")
     rol: Rol = Field(..., example="estudiante", description="Rol: estudiante, coordinador, vicerrector o admin")
 
 
@@ -36,7 +36,7 @@ class UsuarioResponse(UsuarioBase):
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr = Field(..., example="carlos@unicauca.edu.co")
+    email: EmailStr = Field(..., example="estudiante@universidad.edu.co")
     password: str = Field(..., example="123456")
 
 
@@ -80,7 +80,7 @@ class UsuarioEditarPerfil(BaseModel):
 
 
 class SolicitarRecuperacionRequest(BaseModel):
-    email: EmailStr = Field(..., example="carlos@unicauca.edu.co", description="Correo registrado")
+    email: EmailStr = Field(..., example="estudiante@universidad.edu.co", description="Correo registrado")
 
 
 class RestablecerContraseñaRequest(BaseModel):
