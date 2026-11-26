@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     RESET_PASSWORD_TOKEN_EXPIRE_MINUTES: int = 30
 
-    #Gemini
+    # OpenAI
     OPENAI_API_KEY: str
 
     # Kafka

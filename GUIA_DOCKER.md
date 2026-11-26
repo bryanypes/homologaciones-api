@@ -91,6 +91,8 @@ cp .env.example .env.docker
 docker compose up -d --build
 ```
 
+En `.env.docker` hay que cambiar `localhost:5432` por `postgres:5432` (en las dos URL de base de datos) y `redis://localhost:6379` por `redis://redis:6379`, como en la opción 1. Con `localhost` el contenedor de la API no encuentra la base y se reinicia en bucle.
+
 Construye la imagen local y corre las migraciones solo.
 
 ---
