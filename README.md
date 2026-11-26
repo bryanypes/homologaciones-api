@@ -1,103 +1,110 @@
-# HomologaIA — Sistema de Gestión de Homologaciones Académicas
+# HomologaIA — Sistema de Gestión de Homologaciones Académicas (backend)
 
-Backend de HomologaIA, plataforma para gestión de solicitudes de homologación académica de la Corporación Universitaria Autónoma del Cauca. Incluye análisis con IA y generación de resoluciones en Word.
+API de HomologaIA, la plataforma de la Corporación Universitaria Autónoma del Cauca para tramitar solicitudes de homologación. Compara con IA el certificado de notas del estudiante con el pensum de destino y genera la resolución en Word.
+
+| Dato | Valor |
+|---|---|
+| Versión | 1.0.0 (`pyproject.toml`, `APP_VERSION` en `app/core/config.py`) |
+| Fecha | noviembre de 2026 |
+| Commit registrado | el que figura en `ENTREGA.md` de la carpeta de entrega (este archivo no puede llevar su propio hash) |
+| Autores | Bryan Yepes, Karen Mancilla, Zulema León Valencia y Jefferson Muñoz Luligo |
+| Institución | Corporación Universitaria Autónoma del Cauca |
+| Frontend | repositorio `homologaciones-frontend` |
+
+## Requisitos
+
+- Python 3.12 y [uv](https://docs.astral.sh/uv/)
+- PostgreSQL 16
+- Redis 7 (lista de tokens revocados)
+- Docker y Docker Compose, si se quieren levantar PostgreSQL y Redis con `docker-compose.yml`
+- Una clave de OpenAI para el análisis (modelo `gpt-4o-mini`)
+- Opcionales: clave de Brevo (correos) y Cloudflare R2 (archivos). Sin ellas no se envían correos y los archivos quedan en `uploads/`
 
 ## Stack
 
-- **FastAPI** + Python 3.12
-- **PostgreSQL** + Alembic
-- **Redis** (blacklist de tokens JWT)
-- **OpenAI GPT-4o-mini** (análisis de homologaciones)
-- **docxtpl** (resoluciones Word desde plantilla oficial)
-- **Brevo** (notificaciones por correo)
-- **Cloudflare R2** (almacenamiento de archivos)
-- **uv** (gestor de dependencias)
+FastAPI, SQLAlchemy 2 (asyncpg), Alembic, Pydantic 2, python-jose (JWT), bcrypt, OpenAI SDK, pypdf, docxtpl, httpx (Brevo), boto3 (R2). Versiones exactas en `uv.lock`.
 
 ## Roles
 
 | Rol | Qué puede hacer |
 |-----|----------------|
 | Estudiante | Crear solicitudes, subir notas, enviarlas |
-| Coordinador | Revisar solicitudes, activar análisis IA |
-| Vicerrector | Aprobar/rechazar, generar resolución Word |
-| Admin | Gestionar usuarios y programas/pensum |
+| Coordinador | Tomar solicitudes, subir el pensum de destino, activar y corregir el análisis IA, enviarlas al vicerrector |
+| Vicerrector | Corregir asignaturas, aprobar o rechazar, generar la resolución |
+| Admin | Gestionar usuarios y catálogos |
 
 ## Flujo de una solicitud
 
 ```
-BORRADOR → ENVIADA → EN_REVISION → PROCESANDO_IA → PENDIENTE_RECTOR → APROBADA / RECHAZADA
+BORRADOR → ENVIADA → EN_REVISION → PROCESANDO_IA → REVISION_COORDINADOR → PENDIENTE_RECTOR → APROBADA / RECHAZADA
 ```
-
-1. Estudiante crea la solicitud y sube su certificado de notas
-2. Coordinador la toma, sube el pensum destino y activa la IA
-3. GPT-4o-mini analiza los PDFs y genera la tabla de homologación
-4. Vicerrector revisa y aprueba o rechaza
-5. Se genera la resolución oficial en Word
 
 ## Instalación local
 
 ```bash
 git clone https://github.com/bryanypes/homologaciones-api
 cd homologaciones-api
-
 uv sync
-
 cp .env.example .env
-# editar .env con tus valores
+```
 
+`docker-compose.yml` publica PostgreSQL en el puerto **5433** y Redis en el **6380**. Si se usan esos contenedores, en `.env` hay que cambiar `localhost:5432` por `localhost:5433` (en `DATABASE_URL` y `DATABASE_URL_ASYNC`) y `localhost:6379` por `localhost:6380`. También hay que poner `SECRET_KEY` y `OPENAI_API_KEY`.
+
+```bash
 docker compose up -d postgres redis
 uv run alembic upgrade head
 uv run uvicorn app.main:app --reload
 ```
 
-La API queda en `http://localhost:8000/docs`
+- Salud: `GET http://localhost:8000/health` → `{"status": "ok", "version": "1.0.0"}`
+- Documentación: `http://localhost:8000/docs`
+
+Para levantar todo con Docker (API incluida) ver [GUIA_DOCKER.md](GUIA_DOCKER.md).
 
 ## Variables de entorno
 
-Ver `.env.example`. Las mínimas para correr:
-
-- `DATABASE_URL` / `DATABASE_URL_ASYNC`
-- `SECRET_KEY` (cualquier string largo)
-- `OPENAI_API_KEY`
-
-El correo y R2 son opcionales — si no se configuran el sistema funciona igual, sin enviar notificaciones ni guardar archivos en la nube.
+Ver `.env.example`. Obligatorias: `DATABASE_URL`, `DATABASE_URL_ASYNC`, `SECRET_KEY`, `OPENAI_API_KEY`. El resto tiene valor por defecto o es opcional.
 
 ## Usuarios iniciales (seed)
 
-Al arrancar por primera vez se crean automáticamente:
+Al arrancar por primera vez se crean:
 
 | Email | Password | Rol |
 |-------|----------|-----|
 | `admin@universidad.edu.co` | `Admin2024!` | Admin |
 | `vicerrector@universidad.edu.co` | `Rector2024!` | Vicerrector |
 
-El admin puede crear coordinadores desde `POST /api/v1/usuarios/`. El registro público solo acepta estudiantes.
+En un despliegue real hay que cambiar estas contraseñas. El admin crea los coordinadores desde `POST /api/v1/usuarios/`; el registro público solo crea estudiantes.
 
-## Tests
+## Pruebas
 
 ```bash
 uv run pytest tests/ -v
 ```
 
+Las pruebas usan SQLite en memoria y un Redis simulado, así que no necesitan servicios externos. El CI (`.github/workflows/ci.yml`) además aplica las migraciones sobre PostgreSQL 16 y construye la imagen Docker.
+
 ## Estructura
 
 ```
 app/
-├── api/v1/          # Endpoints
-├── core/            # Config, DB, seguridad, seed
-├── models/          # SQLAlchemy
-├── schemas/         # Pydantic
+├── main.py            # aplicación FastAPI, CORS, seed al arrancar
+├── api/v1/            # rutas: auth, solicitudes, documentos, homologaciones, academico, usuarios
+├── core/              # config, base de datos, seguridad, dependencias, seed
+├── models/            # modelos SQLAlchemy (11 tablas)
+├── schemas/           # contratos Pydantic
 ├── services/
-│   ├── ai_service.py       # Análisis con OpenAI
-│   ├── doc_service.py      # Resolución Word (docxtpl)
-│   ├── email_service.py    # Notificaciones (Brevo)
-│   └── storage_service.py  # R2 / disco local
+│   ├── ai_service.py       # análisis con OpenAI
+│   ├── doc_service.py      # resolución Word (docxtpl)
+│   ├── email_service.py    # notificaciones (Brevo)
+│   ├── storage_service.py  # R2 o disco local
+│   └── kafka_service.py    # productor Kafka (no se usa en el flujo actual)
+└── workers/           # consumidor Kafka (no se arranca en el flujo actual)
+alembic/versions/      # 20 migraciones
 templates/
 ├── plantilla_resolucion_matricula.docx
-├── LOGO.png                # Logo fijo en el header de los correos
-├── Iaaprobada.png          # Mascota — solicitud aprobada
-├── Iaerror.png             # Mascota — solicitud rechazada
-├── Iapensando.png          # Mascota — procesando / en revisión / pendiente rector
-├── IAsaludando.png         # Mascota — solicitud enviada / borrador
-└── IAseñalandoderecha.png  # Mascota — recuperación de contraseña
+├── LOGO.png                # logo de los correos
+└── Ia*.png, IA*.png        # mascota de los correos según el estado
+tests/                 # pruebas de endpoints y de /health
+scripts/reset-db.sh    # reinicia la base de desarrollo
 ```
