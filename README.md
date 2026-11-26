@@ -7,7 +7,7 @@ API de HomologaIA, la plataforma de la Corporación Universitaria Autónoma del 
 | Versión | 1.0.0 (`pyproject.toml`, `APP_VERSION` en `app/core/config.py`) |
 | Fecha | noviembre de 2026 |
 | Commit registrado | el que figura en `ENTREGA.md` de la carpeta de entrega (este archivo no puede llevar su propio hash) |
-| Autores | Bryan Yepes, Karen Mancilla, Zulema León Valencia y Jefferson Muñoz Luligo |
+| Autores | Bryan Yepes, Karen Mancilla Solarte, Zulema León Escobar y Jefferson Muñoz Luligo |
 | Institución | Corporación Universitaria Autónoma del Cauca |
 | Frontend | repositorio `homologaciones-frontend` |
 
